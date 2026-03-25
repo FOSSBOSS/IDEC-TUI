@@ -2,17 +2,42 @@
 """
 Interactive terminal shell for controlling an IDEC PLC over serial using MiSmSerial.
 
+Adds:
+- Persistent command history
+- Tab completion
+- Readline support on Linux/macOS
+- Same built-in commands and PLC commands as the current IDEC-TUI shell
+
 Commands:
-  clear                  Clear screen
-  config                 Configure serial connection settings
-  connect                Open the serial connection using current config
-  disconnect             Close the serial connection
-  status                 Show current config + connection state
-  help                   Show help
-  methods                List supported MiSmSerial methods
-  check                  Run the external PLC diagnostic script and return
-  set-time               Set the PLC date/time from this computer and return
-  q | quit | exit        Quit
+  clear
+      Clear screen
+
+  config
+      Configure serial connection settings
+
+  connect
+      Open the serial connection using current config
+
+  disconnect
+      Close the serial connection
+
+  status
+      Show current config + connection state
+
+  help
+      Show help
+
+  methods
+      List supported MiSmSerial methods
+
+  check
+      Run the external PLC diagnostic script and return
+
+  set-time
+      Set the PLC date/time from this computer and return
+
+  q | quit | exit
+      Quit
 
 PLC commands can be entered directly after connecting, for example:
   read D0100
@@ -30,34 +55,138 @@ Notes:
 - This app expects MiSmSerial.py to be importable from the same directory,
   or installed somewhere on your PYTHONPATH.
 - MiSmSerial supports methods including read/write, read_bit/write_bit,
-  input/output, read_float/write_float, read_timer, write_counter,
-  and read_error.
+  input/output, read_float/write_float, read_timer, write_counter, and read_error.
 """
 
 from __future__ import annotations
 
 import ast
+import atexit
 import json
 import os
 import shlex
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-import subprocess
 from typing import Any
 
 try:
     from MiSmSerial import MiSmSerial
 except ImportError:
     print(
-        "Could not import MiSmSerial. Put this script next to MiSmSerial.py "
+        "Could not import MiSmSerial.\n"
+        "Put this script next to MiSmSerial.py "
         "or install the library so Python can import it.",
         file=sys.stderr,
     )
     raise
 
+try:
+    import readline
+except ImportError:
+    readline = None
+
 
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
+HISTORY_PATH = Path.home() / ".plc_terminal_history"
+
+
+BUILTIN_COMMANDS = [
+    "help",
+    "methods",
+    "check",
+    "set-time",
+    "config",
+    "connect",
+    "disconnect",
+    "status",
+    "clear",
+    "q",
+    "quit",
+    "exit",
+]
+
+PLC_COMMANDS = [
+    "read",
+    "write",
+    "read_bit",
+    "write_bit",
+    "input",
+    "output",
+    "read_float",
+    "write_float",
+    "read_timer",
+    "write_counter",
+    "read_error",
+]
+
+CONFIG_KEYS = [
+    "port",
+    "device",
+    "baud",
+    "timeout",
+    "bytesize",
+    "parity",
+    "stopbits",
+    "debug",
+    "bcc_mode",
+]
+
+COMMON_REG_PREFIXES = [
+    "D",
+    "M",
+    "I",
+    "Q",
+    "X",
+    "Y",
+    "R",
+    "T",
+    "C",
+]
+
+COMMON_REGISTERS = [
+    "D8004",
+    "D8005",
+    "D8006",
+    "D8015",
+    "D8016",
+    "D8017",
+    "D8018",
+    "D8019",
+    "D8020",
+    "D8021",
+    "D8029",
+    "M8000",
+    "M8002",
+    "M8010",
+    "M8020",
+    "M8025",
+    "M8070",
+    "M8071",
+    "M8072",
+    "M8172",
+    "M8173",
+    "M8174",
+    "M8175",
+    "M8250",
+    "M8252",
+    "I0",
+    "I1",
+    "I2",
+    "I3",
+    "Q0",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Y0",
+    "Y1",
+    "Y2",
+    "Y3",
+]
+
+YES_WORDS = {"y", "yes", "1", "true", "on"}
+NO_WORDS = {"n", "no", "0", "false", "off"}
 
 
 @dataclass
@@ -73,11 +202,79 @@ class AppConfig:
     bcc_mode: str = "auto"
 
 
+class PLCCompleter:
+    def __init__(self, app: "PLCTerminalApp") -> None:
+        self.app = app
+
+    def _get_candidates(self, text: str, line: str, begidx: int, endidx: int) -> list[str]:
+        try:
+            tokens = shlex.split(line[:begidx], posix=True)
+        except ValueError:
+            tokens = line[:begidx].split()
+
+        current = text or ""
+
+        if begidx == 0:
+            pool = BUILTIN_COMMANDS + PLC_COMMANDS
+            if self.app.plc is not None:
+                pool.extend(self.app.dynamic_method_names())
+            return sorted([p for p in set(pool) if p.startswith(current)])
+
+        if not tokens:
+            return []
+
+        cmd = tokens[0].lower()
+
+        if cmd == "config":
+            pool = CONFIG_KEYS
+            return sorted([p for p in pool if p.startswith(current)])
+
+        if cmd in {"connect", "disconnect", "status", "help", "methods", "check", "set-time", "clear", "q", "quit", "exit"}:
+            return []
+
+        if cmd in {"read", "write", "read_bit", "write_bit", "read_float", "write_float"}:
+            if len(tokens) == 1:
+                pool = COMMON_REGISTERS + COMMON_REG_PREFIXES
+                return sorted([p for p in set(pool) if p.startswith(current.upper()) or p.startswith(current)])
+            return []
+
+        if cmd in {"input", "output"}:
+            if len(tokens) == 1:
+                pool = ["I0", "I1", "I2", "I3", "Q0", "Q1", "Q2", "Q3", "Y0", "Y1", "Y2", "Y3", "0", "1", "2", "3"]
+                return sorted([p for p in pool if p.startswith(current.upper()) or p.startswith(current)])
+            if len(tokens) == 2 and cmd == "output":
+                pool = ["0", "1"]
+                return sorted([p for p in pool if p.startswith(current)])
+            return []
+
+        if cmd in {"read_timer", "write_counter", "read_error"}:
+            pool = ["0", "1", "2", "4", "8", "12", "16"]
+            return sorted([p for p in pool if p.startswith(current)])
+
+        if cmd in self.app.dynamic_method_names():
+            pool = COMMON_REGISTERS + COMMON_REG_PREFIXES + ["0", "1", "true", "false"]
+            return sorted([p for p in set(pool) if p.startswith(current.upper()) or p.startswith(current)])
+
+        return []
+
+    def complete(self, text: str, state: int) -> str | None:
+        if readline is None:
+            return None
+
+        line = readline.get_line_buffer()
+        begidx = readline.get_begidx()
+        endidx = readline.get_endidx()
+
+        matches = self._get_candidates(text, line, begidx, endidx)
+        return matches[state] if state < len(matches) else None
+
+
 class PLCTerminalApp:
     def __init__(self) -> None:
         self.config = self._load_config()
         self.plc: MiSmSerial | None = None
         self.running = True
+        self._setup_readline()
 
     def _load_config(self) -> AppConfig:
         if CONFIG_PATH.exists():
@@ -91,6 +288,64 @@ class PLCTerminalApp:
     def _save_config(self) -> None:
         CONFIG_PATH.write_text(json.dumps(asdict(self.config), indent=2))
 
+    def _setup_readline(self) -> None:
+        if readline is None:
+            return
+
+        try:
+            readline.parse_and_bind("tab: complete")
+        except Exception:
+            pass
+
+        try:
+            readline.parse_and_bind("set show-all-if-ambiguous on")
+        except Exception:
+            pass
+
+        try:
+            readline.parse_and_bind("set completion-ignore-case on")
+        except Exception:
+            pass
+
+        completer = PLCCompleter(self)
+        readline.set_completer(completer.complete)
+
+        if HISTORY_PATH.exists():
+            try:
+                readline.read_history_file(str(HISTORY_PATH))
+            except Exception as exc:
+                print(f"Warning: failed to read history file: {exc}")
+
+        try:
+            readline.set_history_length(2000)
+        except Exception:
+            pass
+
+        atexit.register(self._save_history)
+
+    def _save_history(self) -> None:
+        if readline is None:
+            return
+        try:
+            readline.write_history_file(str(HISTORY_PATH))
+        except Exception as exc:
+            print(f"Warning: failed to save history file: {exc}")
+
+    def dynamic_method_names(self) -> list[str]:
+        if self.plc is None:
+            return []
+        names = []
+        for name in dir(self.plc):
+            if name.startswith("_"):
+                continue
+            try:
+                attr = getattr(self.plc, name)
+            except Exception:
+                continue
+            if callable(attr):
+                names.append(name)
+        return sorted(set(names))
+
     def prompt(self) -> str:
         state = "connected" if self.plc else "disconnected"
         return f"plc[{state}]> "
@@ -98,6 +353,9 @@ class PLCTerminalApp:
     def run(self) -> None:
         print("PLC Terminal")
         print("Type 'help' for help, 'config' to configure the port, 'q' to quit.")
+        if readline is not None:
+            print(f"History file: {HISTORY_PATH}")
+
         while self.running:
             try:
                 line = input(self.prompt()).strip()
@@ -124,33 +382,42 @@ class PLCTerminalApp:
         if cmd in {"q", "quit", "exit"}:
             self.running = False
             return
+
         if cmd == "help":
             self.show_help()
             return
+
         if cmd == "methods":
             self.show_methods()
             return
+
         if cmd == "check":
             self.run_check()
             return
+
         if cmd == "set-time":
             self.set_time()
             return
+
         if cmd == "config":
             self.configure_interactive()
             return
+
         if cmd == "connect":
             self.connect()
             return
+
         if cmd == "disconnect":
             self.disconnect()
             return
+
         if cmd == "status":
             self.show_status()
             return
+
         if cmd == "clear":
             self.clear()
-            return             
+            return
 
         if self.plc is None:
             print("Not connected. Run 'config' and then 'connect' first.")
@@ -162,27 +429,29 @@ class PLCTerminalApp:
         print(
             """
 Built-in commands:
-  config                 Configure connection settings interactively
-  connect                Open serial connection
-  disconnect             Close serial connection
-  status                 Show config and connection status
-  methods                List supported MiSmSerial methods
-  check                  Run SERIAL/EXAMPLES/debug.py and return
-  set-time               Set the PLC clock from this computer
-  help                   Show this help
-  q | quit | exit        Quit
+  config         Configure connection settings interactively
+  connect        Open serial connection
+  disconnect     Close serial connection
+  status         Show config and connection status
+  methods        List supported MiSmSerial methods
+  check          Run SERIAL/EXAMPLES/debug.py and return
+  set-time       Set the PLC clock from this computer
+  help           Show this help
+  clear          Clear the terminal
+  q | quit | exit
+                 Quit
 
 PLC commands:
   read <addr>
   write <addr> <value>
   read_bit <addr>
   write_bit <addr> <0|1>
-  input <I0|X0000|0>
-  output <Q0|Y0000|0> <0|1>
+  input <bit>
+  output <bit> <0|1>
   read_float <addr> [endian]
   write_float <addr> <value> [endian]
-  read_timer <timer_num> [count]
-  write_counter <counter_num> <preset>
+  read_timer [tnum] [count]
+  write_counter <cnum> <preset>
   read_error [addr] [nbytes]
 
 Examples:
@@ -200,7 +469,12 @@ Examples:
   write_float D0200 12.5
   read_timer 0 4
   read_error
-""".strip()
+
+Readline features:
+  - Up/down arrow history
+  - Persistent history saved to ~/.plc_terminal_history
+  - Tab completion for commands and common register names
+            """.strip()
         )
 
     def show_methods(self) -> None:
@@ -220,7 +494,18 @@ Examples:
         ]
         print("Supported MiSmSerial methods:")
         for item in methods:
-            print(f"  - {item}")
+            print(f" - {item}")
+
+        if self.plc is not None:
+            extra = [m for m in self.dynamic_method_names() if m not in {
+                "read", "write", "read_bit", "write_bit", "input", "output",
+                "read_float", "write_float", "read_timer", "write_counter",
+                "read_error", "close"
+            }]
+            if extra:
+                print("\nDetected additional callable methods on current MiSmSerial object:")
+                for item in extra:
+                    print(f" - {item}")
 
     def show_status(self) -> None:
         print("Connection status:", "connected" if self.plc else "disconnected")
@@ -239,7 +524,9 @@ Examples:
         self.config.stopbits = self.ask_int("Stopbits", self.config.stopbits)
         self.config.debug = self.ask_bool("Debug", self.config.debug)
         self.config.bcc_mode = self.ask_choice(
-            "BCC mode", self.config.bcc_mode, ["auto", "enq", "no_enq"]
+            "BCC mode",
+            self.config.bcc_mode,
+            ["auto", "enq", "no_enq"],
         )
 
         self._save_config()
@@ -262,7 +549,11 @@ Examples:
         value = input(f"{label} [y/n, default {default_text}]: ").strip().lower()
         if value == "":
             return default
-        return value in {"y", "yes", "1", "true", "on"}
+        if value in YES_WORDS:
+            return True
+        if value in NO_WORDS:
+            return False
+        raise ValueError("Expected y/n, yes/no, true/false, 1/0, on/off")
 
     def ask_choice(self, label: str, default: str, choices: list[str]) -> str:
         value = input(f"{label} {choices} [{default}]: ").strip().lower()
@@ -297,13 +588,10 @@ Examples:
         )
 
     def clear(self) -> None:
-		#besides user clear, come commands are a lot of lines, esp if debug is on.
-        if os.name == 'nt':
-            os.system('cls') # windows clear
+        if os.name == "nt":
+            os.system("cls")
         else:
-            os.system('clear') 
-        return
-
+            os.system("clear")
 
     def run_check(self) -> None:
         candidates = [
@@ -314,12 +602,14 @@ Examples:
         ]
 
         debug_script = next((p for p in candidates if p.exists()), None)
+
         if debug_script is None:
             print("Could not find debug.py. Expected it beside this app or in SERIAL/EXAMPLES/.")
             return
 
         print(f"Running diagnostic: {debug_script}")
         was_connected = self.plc is not None
+
         if was_connected:
             self.disconnect()
 
@@ -350,7 +640,8 @@ Examples:
         )
         print(
             f"Connected to {self.config.port} "
-            f"(baud={self.config.baud}, device={self.config.device}, bcc_mode={self.config.bcc_mode})"
+            f"(baud={self.config.baud}, device={self.config.device}, "
+            f"bcc_mode={self.config.bcc_mode})"
         )
 
     def disconnect(self) -> None:
@@ -453,11 +744,11 @@ Examples:
             return text.lower() == "true"
 
         try:
-            if text.startswith("0x") or text.startswith("0X"):
+            if text.startswith(("0x", "0X")):
                 return int(text, 16)
-            if text.startswith("0b") or text.startswith("0B"):
+            if text.startswith(("0b", "0B")):
                 return int(text, 2)
-            if text.startswith("0o") or text.startswith("0O"):
+            if text.startswith(("0o", "0O")):
                 return int(text, 8)
         except ValueError:
             pass
