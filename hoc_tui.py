@@ -594,17 +594,11 @@ Readline features:
             os.system("clear")
 
     def run_check(self) -> None:
-        candidates = [
-            Path(__file__).resolve().parent / "debug.py",
-            Path(__file__).resolve().parent / "SERIAL" / "EXAMPLES" / "debug.py",
-            Path.cwd() / "debug.py",
-            Path.cwd() / "SERIAL" / "EXAMPLES" / "debug.py",
-        ]
+        project_root = Path(__file__).resolve().parent
+        debug_script = project_root / "SERIAL" / "debug.py"
 
-        debug_script = next((p for p in candidates if p.exists()), None)
-
-        if debug_script is None:
-            print("Could not find debug.py. Expected it beside this app or in SERIAL/EXAMPLES/.")
+        if not debug_script.is_file():
+            print(f"Could not find diagnostic: {debug_script}")
             return
 
         print(f"Running diagnostic: {debug_script}")
@@ -613,11 +607,26 @@ Readline features:
         if was_connected:
             self.disconnect()
 
+        env = os.environ.copy()
+        old_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            str(project_root)
+            if not old_pythonpath
+            else f"{project_root}{os.pathsep}{old_pythonpath}"
+        )
+
         try:
-            result = subprocess.run([sys.executable, str(debug_script)], check=False)
+            result = subprocess.run(
+                [sys.executable, str(debug_script)],
+                cwd=project_root,
+                env=env,
+                check=False,
+            )
             print(f"Diagnostic finished with exit code {result.returncode}")
+
         except Exception as exc:
             print(f"Failed to run diagnostic: {exc}")
+
         finally:
             if was_connected:
                 try:
