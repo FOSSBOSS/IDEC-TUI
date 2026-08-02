@@ -472,6 +472,6 @@ Expansion Series modules: FC4A, FC5A, FC6A
 Exact compatabliity is unknown, but modules remained responsive with a wide array 
 of mixxing and matching hardware. Responsive hardware does not mean supported operation.
 
-![FC5A Stack used in tui.png](imgs/tui.png)
+![FC5A Stack used in tui.png](imgs/fc5_stack.png)
 
 ![Further testing on FC6A](imgs/Other_test.png)
