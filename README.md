@@ -7,7 +7,7 @@ IDEC-TUI provides a persistent command shell around `MiSmSerial.py`. It is
 intended for maintenance, testing, register inspection, diagnostics, and direct
 PLC interaction without opening WindLDR.
 
-![IDEC-TUI terminal](tui.png)
+![IDEC-TUI terminal](imgs/tui.png)
 
 ## Current capabilities
 
@@ -464,7 +464,7 @@ diagnostics, but it remains an active protocol-development project. Raw protocol
 debugging and conservative hardware reporting are intentional parts of the
 current design.
 
-## Tested on:
+## Tested on Hardware:
 CPU Series Modules: FC5A, FC6A
 
 Expansion Series modules: FC4A, FC5A, FC6A
@@ -472,3 +472,6 @@ Expansion Series modules: FC4A, FC5A, FC6A
 Exact compatabliity is unknown, but modules remained responsive with a wide array 
 of mixxing and matching hardware. Responsive hardware does not mean supported operation.
 
+![FC5A Stack used in tui.png](imgs/tui.png)
+
+![Further testing on FC6A](imgs/Other_test.png)
