@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-MiSmSerial - IDEC MicroSmart "Maintenance Protocol" over SERIAL (ASCII framing)
+MiSmTCP - IDEC MicroSmart "Maintenance Protocol" over TCP/IP (ASCII framing)
 
 Key points:
-- Default baud: 9600 (global BAUD)
+- Default TCP port: 2101 (global PLC_PORT)
 - Frames are ASCII-based, terminated by CR (0x0D)
 - Request format:
     ENQ(0x05) + dev(2 ASCII) + cont('0'/'1') + cmd(1) + dtype(1) + payload + BCC(2 ASCII hex) + CR
@@ -19,7 +19,7 @@ Simple enumerable I/O:
 - output(0,1) or output("Q0",1) -> writes Y bit using payload like "00001" (exactly your table)
 - input(0) or input("I0") -> reads X bit
 
-Requires: pip install pyserial
+Requires: Python standard library only
 """
 
 from __future__ import annotations
@@ -28,18 +28,17 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, List, Dict, Any, Union
 import struct
 import time
-
-import serial
+import socket
 
 
 # -------------------------
 # Globals
 # -------------------------
 
-BAUD = 9600
+PLC_PORT = 2101
 DEFAULT_DEVICE = "FF"
 DEFAULT_TIMEOUT = 1.0
-PRECISION = 3 # default is 6, on the PLCs, but my typical use is 3-4, so.. 
+#PRECISION = 3 # default is 6, on the PLCs, but my typical use is 3-4, so.. 
 
 # -------------------------
 # Low-level helpers
@@ -180,6 +179,38 @@ def _parse_io(io: Union[str, int], is_out: bool) -> Tuple[str, int]:
 
     raise ValueError("IO must start with Q/I or X/Y (e.g. Q0, I7, Y0000, X0007)")
 
+# -------------------------
+# Connection error handling
+# -------------------------
+class MiSmConnectionError(ConnectionError):
+    """Raised when communication with the PLC cannot be established."""
+
+def connect(self):
+    if self._sock is not None:
+        return
+
+    try:
+        self._sock = socket.create_connection(
+            (self.host, self.port),
+            timeout=self.timeout,
+        )
+
+    except TimeoutError as exc:
+        raise MiSmConnectionError(
+            f"PLC not found at {self.host}:{self.port}. "
+            "Check the IP address, PLC power, and network cabling."
+        ) from exc
+
+    except ConnectionRefusedError as exc:
+        raise MiSmConnectionError(
+            f"PLC connection refused at {self.host}:{self.port}. "
+            "Check that maintenance communication is enabled."
+        ) from exc
+
+    except OSError as exc:
+        raise MiSmConnectionError(
+            f"Unable to connect to PLC at {self.host}:{self.port}: {exc}"
+        ) from exc
 
 # -------------------------
 # Reply parsing / ACK-NAK
@@ -270,51 +301,110 @@ def ack_ng(rep: Reply) -> bool:
 
 
 # -------------------------
-# Main Serial client
+# Main TCP client
 # -------------------------
 
-class MiSmSerial:
+class MiSmTCP:
     """
-    Serial client for IDEC MicroSmart Maintenance Protocol.
+    TCP client for IDEC MicroSmart / FC6A Maintenance Protocol.
+
+    The public API intentionally mirrors MiSmSerial as closely as possible:
+      read("D0100")          # word read
+      read("D0100.03")       # bit read inside a word
+      write("D0100", 1234)   # word write
+      write("D0100.03", 1)   # bit write inside a word
+      read_bit("M8070")      # explicit native/special bit device read
+      write_bit("Y0000", 1)  # explicit native/special bit device write
+      read_float("D0100")
+      write_float("D0100", 1.23)
+
+    The PLC Ethernet connection must be configured as Maintenance Communication
+    server. FC6A default Maintenance TCP port is commonly 2101.
     """
 
     def __init__(
         self,
-        port: str,
+        host: str,
+        port: int = PLC_PORT,
         device: str = DEFAULT_DEVICE,
-        baud: int = BAUD,
         timeout: float = DEFAULT_TIMEOUT,
-        bytesize: int = 8,
-        parity: str = "N",
-        stopbits: int = 1,
         debug: bool = False,
         bcc_mode: str = "auto",   # "auto" | "enq" | "no_enq"
+        keep_open: bool = True,
+        connect_now: bool = True,
+        precision = 3,
     ):
         if len(device) != 2:
             raise ValueError("device must be 2 ASCII hex chars (e.g. 'FF')")
         if bcc_mode not in ("auto", "enq", "no_enq"):
             raise ValueError("bcc_mode must be 'auto', 'enq', or 'no_enq'")
 
-        self.port = port
+        self.host = host
+        self.port = int(port)
         self.device = device.upper()
-        self.baud = baud
         self.timeout = timeout
         self.debug = debug
         self.bcc_mode = bcc_mode
+        self.keep_open = keep_open
+        self._sock: Optional[socket.socket] = None
+        self.precision = precision
 
-        self._ser = serial.Serial(
-            port=port,
-            baudrate=baud,
-            timeout=timeout,
-            bytesize=bytesize,
-            parity=parity,
-            stopbits=stopbits,
-        )
+        if connect_now and keep_open:
+            self.connect()
+
+    # better error handling when connection issues occur 
+    def connect(self) -> None:
+        """Open the TCP connection if it is not already open."""
+        if self._sock is not None:
+            return
+
+        try:
+            sock = socket.create_connection(
+                (self.host, self.port),
+                timeout=self.timeout,
+            )
+            sock.settimeout(self.timeout)
+            self._sock = sock
+
+        except TimeoutError:
+            raise SystemExit(
+                f"PLC not found at {self.host}:{self.port}. "
+                "Check the IP address, PLC power, and network cabling."
+            ) from None
+
+        except ConnectionRefusedError:
+            raise SystemExit(
+                f"PLC connection refused at {self.host}:{self.port}. "
+                "Check that maintenance communication is enabled."
+            ) from None
+
+        except OSError as exc:
+            raise SystemExit(
+                f"Unable to connect to PLC at {self.host}:{self.port}: {exc}"
+            ) from None   
+  
 
     def close(self) -> None:
-        if self._ser and self._ser.is_open:
-            self._ser.close()
+        """Close the TCP connection."""
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            finally:
+                self._sock = None
 
+    disconnect = close
+
+    def reconnect(self) -> None:
+        """Force a clean reconnect."""
+        self.close()
+        self.connect()
+
+    def __enter__(self) -> "MiSmTCP":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
     # ------------
     # Framing / transport
     # ------------
@@ -349,28 +439,53 @@ class MiSmSerial:
 
         return framed
 
-    def _recv_until_cr(self, limit: int = 8192) -> bytes:
+    def _recv_until_cr(self, sock: socket.socket, limit: int = 8192) -> bytes:
+        """Receive bytes until CR, timeout, close, or limit."""
         buf = bytearray()
         start = time.time()
         while len(buf) < limit:
-            b = self._ser.read(1)
-            if b:
-                buf.extend(b)
-                if b == b"\r":
-                    break
-            else:
+            try:
+                chunk = sock.recv(1)
+            except socket.timeout:
                 break
+
+            if not chunk:
+                break
+
+            buf.extend(chunk)
+            if chunk == b"\r":
+                break
+
             if time.time() - start > (self.timeout * 3):
                 break
+
         return bytes(buf)
+
+    def _send_recv(self, req: bytes) -> bytes:
+        """Send one framed request and return one CR-terminated reply."""
+        if self.keep_open:
+            self.connect()
+            assert self._sock is not None
+            try:
+                self._sock.sendall(req)
+                return self._recv_until_cr(self._sock)
+            except (OSError, socket.timeout):
+                # A stale PLC socket is common after cable changes, power cycles, etc.
+                # Reconnect once and retry the same request.
+                self.reconnect()
+                assert self._sock is not None
+                self._sock.sendall(req)
+                return self._recv_until_cr(self._sock)
+
+        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
+            sock.settimeout(self.timeout)
+            sock.sendall(req)
+            return self._recv_until_cr(sock)
 
     def _xfer_once(self, cont: str, cmd: str, dtype: str, payload: bytes, include_enq: bool) -> Reply:
         req = self._frame_req(cont, cmd, dtype, payload, include_enq=include_enq)
-        self._ser.reset_input_buffer()
-        self._ser.write(req)
-        self._ser.flush()
+        raw = self._send_recv(req)
 
-        raw = self._recv_until_cr()
         if self.debug:
             print("RX(hex):  ", raw.hex())
 
@@ -423,8 +538,18 @@ class MiSmSerial:
     def write(self, addr: Union[str, int], value: int, endian: int = 0, dtype: Optional[str] = None) -> int:
         """
         Write a 16-bit word using Write N Bytes (n=2).
-        Returns written value masked to 16-bit.
+
+        Dotted word-bit addresses are routed to write_bit():
+          write("D0100", 1234)    -> writes the whole D0100 word
+          write("D0100.0", 1)     -> sets bit 0 of D0100
+          write("D0100.00", 1)    -> same as D0100.0
+          write("D0100.15", 0)    -> clears bit 15 of D0100
+
+        Returns written value masked to 16-bit for word writes, or 0/1 for bit writes.
         """
+        if isinstance(addr, str) and "." in addr:
+            return self.write_bit(addr, value)
+
         dt, op = _parse_addr(addr, dtype=dtype)
         dt = _dtype_for_nbyte(dt)
 
@@ -438,8 +563,18 @@ class MiSmSerial:
     def read(self, addr: Union[str, int], endian: int = 0, dtype: Optional[str] = None) -> int:
         """
         Read a 16-bit word using Read N Bytes (n=2).
-        Returns 0..65535.
+
+        Dotted word-bit addresses are routed to read_bit():
+          read("D0100")       -> reads the whole D0100 word
+          read("D0100.0")     -> reads bit 0 of D0100
+          read("D0100.00")    -> same as D0100.0
+          read("D0100.15")    -> reads bit 15 of D0100
+
+        Returns 0..65535 for word reads, or 0/1 for bit reads.
         """
+        if isinstance(addr, str) and "." in addr:
+            return self.read_bit(addr)
+
         dt, op = _parse_addr(addr, dtype=dtype)
         dt = _dtype_for_nbyte(dt)
 
@@ -460,6 +595,15 @@ class MiSmSerial:
         """
         Write 1 bit. Compatible with calls like write_bit("Y0000", 1, 0).
         """
+        # --- Q/I convenience aliases ---
+        if isinstance(addr, str) and "." not in addr:
+            s = addr.strip().upper()
+
+            if s.startswith("Q") and s[1:].isdigit():
+                addr = f"Y{int(s[1:]):04d}"
+
+            elif s.startswith("I") and s[1:].isdigit():
+                addr = f"X{int(s[1:]):04d}"
 
         # --- support word.bit syntax ---
         if isinstance(addr, str) and "." in addr:
@@ -492,8 +636,29 @@ class MiSmSerial:
 
     def read_bit(self, addr: Union[str, int], endian: int = 0, dtype: Optional[str] = None) -> int:
         """
-        Read 1 bit. Compatible with calls like read_bit("M8070", 0).
+        Read 1 bit explicitly.
+
+        Prefer read("D0100.03") for bits inside word devices such as D registers.
+        Use read_bit() for special/native bit devices such as M, X, Y, and R:
+          read_bit("M8070")
+          read_bit("X0000")
+          read_bit("Y0007")
+          read_bit("M8004.15")
+
+        Dotted bit numbers may be padded or unpadded:
+          D0100.1 == D0100.01
+          D0100.0 == D0100.00
         """
+        # --- Q/I convenience aliases ---
+        if isinstance(addr, str) and "." not in addr:
+            s = addr.strip().upper()
+
+            if s.startswith("Q") and s[1:].isdigit():
+                addr = f"Y{int(s[1:]):04d}"
+
+            elif s.startswith("I") and s[1:].isdigit():
+                addr = f"X{int(s[1:]):04d}"
+        
         # --- support word.bit syntax ---
         if isinstance(addr, str) and "." in addr:
             base, bit = addr.split(".")
@@ -635,7 +800,6 @@ class MiSmSerial:
         for i in range(n):
             vals.append(int(rep.data[i * 4:(i + 1) * 4].decode("ascii"), 16))
         return vals
-  
     # -------------------------
     # Blocks of data 
     # -------------------------
@@ -729,6 +893,7 @@ class MiSmSerial:
 
         return self.write_block(addr, words, endian=endian, dtype=dtype)
 
+
     # -------------------------
     # Float helpers (2 regs)
     # -------------------------
@@ -764,7 +929,8 @@ class MiSmSerial:
 
         b = struct.pack(">HH", high, low)
         val = struct.unpack(">f", b)[0]
-        return round(val, PRECISION)
+        #return round(val, PRECISION)
+        return round(val, self.precision)
         #return struct.unpack(">f", b)[0]
 
     def write_float(self, addr: Union[str, int], value: float, endian: int = 0, dtype: Optional[str] = None) -> float:
@@ -792,6 +958,10 @@ class MiSmSerial:
         rep = self._xfer("0", "W", dt, payload)
         self._raise_if_err(rep)
         return float(value)
+
+    # -------------------------
+    # Forced I/O 
+    # -------------------------
 
     def force_io(self, enable: bool = True) -> int:
         """
@@ -826,46 +996,82 @@ class MiSmSerial:
 
         return v
 
-    def release_force(self, bit: Union[str, int]) -> int:
+    #def release_force(self, bit: Union[str, int]) -> int:
+    def release_force(self) -> int:
         """Release Force control."""        	
-        return self.force(False)
+        return self.force_io(False)
 
     # Short aliases
     force_output = force
     force_release = release_force
 
+    # -------------------------
+    # Upload: plc to pc.
+    # -------------------------
+
+    def upload(self, filename=None):
+        """
+        Upload PLC program image.
+
+        Returns:
+            bytes
+        """
+
+        # Try upload start
+        try:
+            self._upload_begin()
+
+        except PLCPasswordRequired:
+            import getpass
+
+            pw = getpass.getpass("PLC upload password: ")
+
+            if not self._unlock_upload(pw):
+                raise IOError("Incorrect PLC password")
+
+            self._upload_begin()
+
+        blocks = []
+
+        while True:
+            chunk, done = self._upload_next_block()
+
+            blocks.append(chunk)
+
+            if done:
+                break
+
+        blob = b"".join(blocks)
+
+        if filename:
+            with open(filename, "wb") as f:
+                f.write(blob)
+
+        return blob
+
+    ## checksum the PLC program
+    def upload_sha256(self):
+        import hashlib
+        return hashlib.sha256(self.upload()).hexdigest()
 
 # -------------------------
 # Optional module-level wrappers
 # -------------------------
 
-def input(plc: MiSmSerial, bit: Union[str, int]) -> int:
+def input(plc: MiSmTCP, bit: Union[str, int]) -> int:
     return plc.input(bit)
 
 
-def output(plc: MiSmSerial, bit: Union[str, int], on: int = 1) -> int:
+def output(plc: MiSmTCP, bit: Union[str, int], on: int = 1) -> int:
     return plc.output(bit, on)
 
-
+"""
 # -------------------------
 if __name__ == "__main__":
     # Example: your test sequence
-    plc = MiSmSerial("/dev/ttyACM0", device="FF", debug=False, bcc_mode="auto")
+    plc = MiSmTCP("192.168.1.5", device="FF", debug=True, bcc_mode="auto")
 
-    try:
-        print("before writing block:",plc.read_uint("D0105", count=2, endian=1))
-
-        #written = plc.write_block("D0105", [1883, 52501], endian=1)
-        written = plc.write_uint("D0105", 69420, count=2, endian=1)
-        print("written block:", written)
-
-        print("after block:", plc.read_block("D0105", count=2, endian=1))
-        print("after uint:", plc.read_uint("D0105", count=2, endian=1))
-
-    finally:
-        plc.close()
-
-"""
+    from time import sleep
     v = plc.read_bit("M8004.01")   # second arg accepted/ignored for compatibility
     print(v)
     v = plc.read("M8004")   # second arg accepted/ignored for compatibility
@@ -886,3 +1092,8 @@ if __name__ == "__main__":
     plc.close()
 
 """
+
+
+# Backward-friendly aliases.
+PLC = MiSmTCP
+Client = MiSmTCP
