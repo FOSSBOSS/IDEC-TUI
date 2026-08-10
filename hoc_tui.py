@@ -6,56 +6,22 @@ Adds:
 - Persistent command history
 - Tab completion
 - Readline support on Linux/macOS
-- Same built-in commands and PLC commands as the current IDEC-TUI shell
+- Script execution with "run <file>"
+- Script delay with "sleep <seconds>"
+- Simple for loops in script files
 
-Commands:
-  clear
-      Clear screen
+Script example:
 
-  config
-      Configure serial connection settings
-
-  connect
-      Open the serial connection using current config
-
-  disconnect
-      Close the serial connection
-
-  status
-      Show current config + connection state
-
-  help
-      Show help
-
-  methods
-      List supported MiSmSerial methods
-
-  check
-      Run the external PLC diagnostic script and return
-
-  set-time
-      Set the PLC date/time from this computer and return
-
-  q | quit | exit
-      Quit
-
-PLC commands can be entered directly after connecting, for example:
-  read D0100
-  write D0100 1234
-  read_bit M8004.15
-  write_bit M8004.15 1
-  input I0
-  output Q0 1
-  read_float D0200
-  write_float D0200 12.5
-  read_timer 0 4
-  read_error
+    for i 30 37
+        output Q00$i 1
+        sleep 0.25
+        output Q00$i 0
+    end
 
 Notes:
-- This app expects MiSmSerial.py to be importable from the same directory,
-  or installed somewhere on your PYTHONPATH.
-- MiSmSerial supports methods including read/write, read_bit/write_bit,
-  input/output, read_float/write_float, read_timer, write_counter, and read_error.
+- The first scripting implementation intentionally does not support nested loops.
+- Script commands are passed through the same handle_line() command dispatcher
+  used by the interactive terminal.
 """
 
 from __future__ import annotations
@@ -64,9 +30,11 @@ import ast
 import atexit
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -88,9 +56,10 @@ except ImportError:
     readline = None
 
 
+SCRIPT_BUILD = "2026-08-10-v2"
+
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
-
 
 BUILTIN_COMMANDS = [
     "help",
@@ -102,6 +71,8 @@ BUILTIN_COMMANDS = [
     "disconnect",
     "status",
     "clear",
+    "run",
+    "sleep",
     "q",
     "quit",
     "exit",
@@ -206,7 +177,13 @@ class PLCCompleter:
     def __init__(self, app: "PLCTerminalApp") -> None:
         self.app = app
 
-    def _get_candidates(self, text: str, line: str, begidx: int, endidx: int) -> list[str]:
+    def _get_candidates(
+        self,
+        text: str,
+        line: str,
+        begidx: int,
+        endidx: int,
+    ) -> list[str]:
         try:
             tokens = shlex.split(line[:begidx], posix=True)
         except ValueError:
@@ -226,25 +203,77 @@ class PLCCompleter:
         cmd = tokens[0].lower()
 
         if cmd == "config":
-            pool = CONFIG_KEYS
-            return sorted([p for p in pool if p.startswith(current)])
+            return sorted([p for p in CONFIG_KEYS if p.startswith(current)])
 
-        if cmd in {"connect", "disconnect", "status", "help", "methods", "check", "set-time", "clear", "q", "quit", "exit"}:
+        if cmd in {
+            "connect",
+            "disconnect",
+            "status",
+            "help",
+            "methods",
+            "check",
+            "set-time",
+            "clear",
+            "sleep",
+            "q",
+            "quit",
+            "exit",
+        }:
             return []
 
-        if cmd in {"read", "write", "read_bit", "write_bit", "read_float", "write_float"}:
+        if cmd == "run":
+            return []
+
+        if cmd in {
+            "read",
+            "write",
+            "read_bit",
+            "write_bit",
+            "read_float",
+            "write_float",
+        }:
             if len(tokens) == 1:
                 pool = COMMON_REGISTERS + COMMON_REG_PREFIXES
-                return sorted([p for p in set(pool) if p.startswith(current.upper()) or p.startswith(current)])
+                return sorted(
+                    [
+                        p
+                        for p in set(pool)
+                        if p.startswith(current.upper()) or p.startswith(current)
+                    ]
+                )
             return []
 
         if cmd in {"input", "output"}:
             if len(tokens) == 1:
-                pool = ["I0", "I1", "I2", "I3", "Q0", "Q1", "Q2", "Q3", "Y0", "Y1", "Y2", "Y3", "0", "1", "2", "3"]
-                return sorted([p for p in pool if p.startswith(current.upper()) or p.startswith(current)])
+                pool = [
+                    "I0",
+                    "I1",
+                    "I2",
+                    "I3",
+                    "Q0",
+                    "Q1",
+                    "Q2",
+                    "Q3",
+                    "Y0",
+                    "Y1",
+                    "Y2",
+                    "Y3",
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                ]
+                return sorted(
+                    [
+                        p
+                        for p in pool
+                        if p.startswith(current.upper()) or p.startswith(current)
+                    ]
+                )
+
             if len(tokens) == 2 and cmd == "output":
-                pool = ["0", "1"]
-                return sorted([p for p in pool if p.startswith(current)])
+                return sorted([p for p in ["0", "1"] if p.startswith(current)])
+
             return []
 
         if cmd in {"read_timer", "write_counter", "read_error"}:
@@ -252,8 +281,15 @@ class PLCCompleter:
             return sorted([p for p in pool if p.startswith(current)])
 
         if cmd in self.app.dynamic_method_names():
-            pool = COMMON_REGISTERS + COMMON_REG_PREFIXES + ["0", "1", "true", "false"]
-            return sorted([p for p in set(pool) if p.startswith(current.upper()) or p.startswith(current)])
+            pool = COMMON_REGISTERS + COMMON_REG_PREFIXES
+            pool += ["0", "1", "true", "false"]
+            return sorted(
+                [
+                    p
+                    for p in set(pool)
+                    if p.startswith(current.upper()) or p.startswith(current)
+                ]
+            )
 
         return []
 
@@ -283,6 +319,7 @@ class PLCTerminalApp:
                 return AppConfig(**data)
             except Exception as exc:
                 print(f"Warning: failed to load config: {exc}")
+
         return AppConfig()
 
     def _save_config(self) -> None:
@@ -290,25 +327,28 @@ class PLCTerminalApp:
 
     def _setup_readline(self) -> None:
         if readline is None:
+            print("Readline unavailable: tab completion disabled.")
             return
 
+        self._completer = PLCCompleter(self)
+
+        readline.set_completer(self._completer.complete)
+
+        # Only whitespace separates completion words.
+        readline.set_completer_delims(" \t\n")
+
+        # Bind both forms of Tab for GNU readline.
         try:
             readline.parse_and_bind("tab: complete")
-        except Exception:
-            pass
+            readline.parse_and_bind('"\\C-i": complete')
+        except Exception as exc:
+            print(f"Warning: readline completion setup failed: {exc}")
 
         try:
             readline.parse_and_bind("set show-all-if-ambiguous on")
-        except Exception:
-            pass
-
-        try:
             readline.parse_and_bind("set completion-ignore-case on")
         except Exception:
             pass
-
-        completer = PLCCompleter(self)
-        readline.set_completer(completer.complete)
 
         if HISTORY_PATH.exists():
             try:
@@ -326,6 +366,7 @@ class PLCTerminalApp:
     def _save_history(self) -> None:
         if readline is None:
             return
+
         try:
             readline.write_history_file(str(HISTORY_PATH))
         except Exception as exc:
@@ -334,16 +375,21 @@ class PLCTerminalApp:
     def dynamic_method_names(self) -> list[str]:
         if self.plc is None:
             return []
+
         names = []
+
         for name in dir(self.plc):
             if name.startswith("_"):
                 continue
+
             try:
                 attr = getattr(self.plc, name)
             except Exception:
                 continue
+
             if callable(attr):
                 names.append(name)
+
         return sorted(set(names))
 
     def prompt(self) -> str:
@@ -351,8 +397,9 @@ class PLCTerminalApp:
         return f"plc[{state}]> "
 
     def run(self) -> None:
-        print("PLC Terminal")
+        print(f"PLC Terminal [{SCRIPT_BUILD}]")
         print("Type 'help' for help, 'config' to configure the port, 'q' to quit.")
+
         if readline is not None:
             print(f"History file: {HISTORY_PATH}")
 
@@ -376,6 +423,10 @@ class PLCTerminalApp:
 
     def handle_line(self, line: str) -> None:
         parts = shlex.split(line)
+
+        if not parts:
+            return
+
         cmd = parts[0].lower()
         args = parts[1:]
 
@@ -419,11 +470,239 @@ class PLCTerminalApp:
             self.clear()
             return
 
+        if cmd == "run":
+            self.require_args(cmd, args, 1)
+            self.run_script(args[0])
+            return
+
+        if cmd == "sleep":
+            self.require_args(cmd, args, 1)
+            time.sleep(float(self.parse_value(args[0])))
+            return
+
+        if cmd in {"print", "echo"}:
+            print(" ".join(args))
+            return
+
         if self.plc is None:
             print("Not connected. Run 'config' and then 'connect' first.")
             return
 
         self.execute_plc_command(cmd, args)
+
+    def run_script(self, filename: str) -> None:
+        path = Path(filename)
+
+        if not path.is_file():
+            raise FileNotFoundError(f"Script not found: {path}")
+
+        lines = []
+
+        with path.open("r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+
+                if not line:
+                    continue
+
+                if line.startswith("#"):
+                    continue
+
+                lines.append(line)
+
+        self.execute_script_lines(lines)
+
+    def expand_script_vars(
+        self,
+        line: str,
+        variables: dict[str, Any],
+    ) -> str:
+        def replace(match: re.Match[str]) -> str:
+            name = match.group(1)
+            return str(variables.get(name, match.group(0)))
+
+        return re.sub(r"\$([A-Za-z_][A-Za-z0-9_]*)", replace, line)
+
+    def script_tokens(self, line: str) -> list[str]:
+        return shlex.split(line, comments=True)
+
+    def find_script_block(
+        self,
+        lines: list[str],
+        start: int,
+        allow_else: bool = False,
+    ) -> tuple[list[str], list[str] | None, int]:
+        body: list[str] = []
+        else_body: list[str] | None = None
+        target = body
+        depth = 1
+        i = start
+
+        while i < len(lines):
+            parts = self.script_tokens(lines[i])
+
+            if parts:
+                cmd = parts[0].lower()
+
+                if cmd in {"for", "if"}:
+                    depth += 1
+
+                elif cmd == "end":
+                    depth -= 1
+
+                    if depth == 0:
+                        return body, else_body, i
+
+                elif cmd == "else" and depth == 1:
+                    if not allow_else:
+                        raise ValueError("Unexpected 'else'")
+
+                    if else_body is not None:
+                        raise ValueError("Multiple 'else' blocks in one if")
+
+                    else_body = []
+                    target = else_body
+                    i += 1
+                    continue
+
+            target.append(lines[i])
+            i += 1
+
+        raise ValueError("Missing 'end'")
+
+    def evaluate_script_condition(self, parts: list[str]) -> bool:
+        operators = {"==", "!=", "<", "<=", ">", ">="}
+        op_index = -1
+
+        for i, token in enumerate(parts):
+            if token in operators:
+                op_index = i
+                break
+
+        if op_index < 2 or op_index >= len(parts) - 1:
+            raise ValueError(
+                "Usage: if <PLC command> <operator> <value>"
+            )
+
+        command = parts[1]
+        command_args = parts[2:op_index]
+        operator = parts[op_index]
+        right_text = " ".join(parts[op_index + 1:])
+
+        if self.plc is None:
+            raise RuntimeError(
+                "Not connected. Run 'config' and then 'connect' first."
+            )
+
+        left = self.execute_plc_command(
+            command,
+            command_args,
+            echo=False,
+        )
+        right = self.parse_value(right_text)
+
+        if operator == "==":
+            return left == right
+
+        if operator == "!=":
+            return left != right
+
+        if operator == "<":
+            return left < right
+
+        if operator == "<=":
+            return left <= right
+
+        if operator == ">":
+            return left > right
+
+        if operator == ">=":
+            return left >= right
+
+        raise ValueError(f"Unsupported operator: {operator}")
+
+    def execute_script_lines(
+        self,
+        lines: list[str],
+        variables: dict[str, Any] | None = None,
+    ) -> None:
+        if variables is None:
+            variables = {}
+
+        i = 0
+
+        while i < len(lines):
+            raw_line = lines[i]
+            line = self.expand_script_vars(raw_line, variables)
+            parts = self.script_tokens(line)
+
+            if not parts:
+                i += 1
+                continue
+
+            cmd = parts[0].lower()
+
+            if cmd == "for":
+                if len(parts) != 4:
+                    raise ValueError(
+                        "Usage: for <variable> <start> <stop>"
+                    )
+
+                var = parts[1]
+                start_value = int(self.parse_value(parts[2]))
+                stop_value = int(self.parse_value(parts[3]))
+
+                body, else_body, end_index = self.find_script_block(
+                    lines,
+                    i + 1,
+                )
+
+                if else_body is not None:
+                    raise ValueError("Unexpected 'else' in for loop")
+
+                step = 1 if stop_value >= start_value else -1
+
+                for value in range(
+                    start_value,
+                    stop_value + step,
+                    step,
+                ):
+                    child_vars = variables.copy()
+                    child_vars[var] = value
+                    self.execute_script_lines(body, child_vars)
+
+                i = end_index
+
+            elif cmd == "if":
+                body, else_body, end_index = self.find_script_block(
+                    lines,
+                    i + 1,
+                    allow_else=True,
+                )
+
+                if self.evaluate_script_condition(parts):
+                    self.execute_script_lines(
+                        body,
+                        variables.copy(),
+                    )
+                elif else_body is not None:
+                    self.execute_script_lines(
+                        else_body,
+                        variables.copy(),
+                    )
+
+                i = end_index
+
+            elif cmd == "else":
+                raise ValueError("Unexpected 'else'")
+
+            elif cmd == "end":
+                raise ValueError("Unexpected 'end'")
+
+            else:
+                self.handle_line(line)
+
+            i += 1
 
     def show_help(self) -> None:
         print(
@@ -434,8 +713,10 @@ Built-in commands:
   disconnect     Close serial connection
   status         Show config and connection status
   methods        List supported MiSmSerial methods
-  check          Run SERIAL/EXAMPLES/debug.py and return
+  check          Run SERIAL/debug.py and return
   set-time       Set the PLC clock from this computer
+  run <file>     Run a PLC command script
+  sleep <sec>    Pause execution for a number of seconds
   help           Show this help
   clear          Clear the terminal
   q | quit | exit
@@ -454,11 +735,25 @@ PLC commands:
   write_counter <cnum> <preset>
   read_error [addr] [nbytes]
 
+Script syntax:
+  for <variable> <start> <stop>
+      <commands>
+  end
+
+Variable substitution:
+  $variable
+
+Example script:
+  for q 30 37
+      output Q00$q 1
+      sleep 0.25
+      output Q00$q 0
+  end
+
+Run it with:
+  run test.plc
+
 Examples:
-  config
-  connect
-  check
-  set-time
   read D0100
   write D0100 42
   read_bit M8004.15
@@ -468,12 +763,12 @@ Examples:
   read_float D0200
   write_float D0200 12.5
   read_timer 0 4
-  read_error
 
-Readline features:
+Features:
   - Up/down arrow history
   - Persistent history saved to ~/.plc_terminal_history
-  - Tab completion for commands and common register names
+  - Tab completion for commands and common register names 
+    ( LINUX )
             """.strip()
         )
 
@@ -492,23 +787,48 @@ Readline features:
             "read_error(addr=0, nbytes=12)",
             "close()",
         ]
+
         print("Supported MiSmSerial methods:")
+
         for item in methods:
             print(f" - {item}")
 
         if self.plc is not None:
-            extra = [m for m in self.dynamic_method_names() if m not in {
-                "read", "write", "read_bit", "write_bit", "input", "output",
-                "read_float", "write_float", "read_timer", "write_counter",
-                "read_error", "close"
-            }]
+            known = {
+                "read",
+                "write",
+                "read_bit",
+                "write_bit",
+                "input",
+                "output",
+                "read_float",
+                "write_float",
+                "read_timer",
+                "write_counter",
+                "read_error",
+                "close",
+            }
+
+            extra = [
+                m
+                for m in self.dynamic_method_names()
+                if m not in known
+            ]
+
             if extra:
-                print("\nDetected additional callable methods on current MiSmSerial object:")
+                print(
+                    "\nDetected additional callable methods "
+                    "on current MiSmSerial object:"
+                )
+
                 for item in extra:
                     print(f" - {item}")
 
     def show_status(self) -> None:
-        print("Connection status:", "connected" if self.plc else "disconnected")
+        print(
+            "Connection status:",
+            "connected" if self.plc else "disconnected",
+        )
         print(json.dumps(asdict(self.config), indent=2))
 
     def configure_interactive(self) -> None:
@@ -516,13 +836,31 @@ Readline features:
         self.disconnect()
 
         self.config.port = self.ask_str("Port", self.config.port)
-        self.config.device = self.ask_str("Device", self.config.device).upper()
+        self.config.device = self.ask_str(
+            "Device",
+            self.config.device,
+        ).upper()
         self.config.baud = self.ask_int("Baud", self.config.baud)
-        self.config.timeout = self.ask_float("Timeout (seconds)", self.config.timeout)
-        self.config.bytesize = self.ask_int("Bytesize", self.config.bytesize)
-        self.config.parity = self.ask_str("Parity", self.config.parity).upper()
-        self.config.stopbits = self.ask_int("Stopbits", self.config.stopbits)
-        self.config.debug = self.ask_bool("Debug", self.config.debug)
+        self.config.timeout = self.ask_float(
+            "Timeout (seconds)",
+            self.config.timeout,
+        )
+        self.config.bytesize = self.ask_int(
+            "Bytesize",
+            self.config.bytesize,
+        )
+        self.config.parity = self.ask_str(
+            "Parity",
+            self.config.parity,
+        ).upper()
+        self.config.stopbits = self.ask_int(
+            "Stopbits",
+            self.config.stopbits,
+        )
+        self.config.debug = self.ask_bool(
+            "Debug",
+            self.config.debug,
+        )
         self.config.bcc_mode = self.ask_choice(
             "BCC mode",
             self.config.bcc_mode,
@@ -546,21 +884,42 @@ Readline features:
 
     def ask_bool(self, label: str, default: bool) -> bool:
         default_text = "y" if default else "n"
-        value = input(f"{label} [y/n, default {default_text}]: ").strip().lower()
+
+        value = input(
+            f"{label} [y/n, default {default_text}]: "
+        ).strip().lower()
+
         if value == "":
             return default
+
         if value in YES_WORDS:
             return True
+
         if value in NO_WORDS:
             return False
-        raise ValueError("Expected y/n, yes/no, true/false, 1/0, on/off")
 
-    def ask_choice(self, label: str, default: str, choices: list[str]) -> str:
-        value = input(f"{label} {choices} [{default}]: ").strip().lower()
+        raise ValueError(
+            "Expected y/n, yes/no, true/false, 1/0, on/off"
+        )
+
+    def ask_choice(
+        self,
+        label: str,
+        default: str,
+        choices: list[str],
+    ) -> str:
+        value = input(
+            f"{label} {choices} [{default}]: "
+        ).strip().lower()
+
         if value == "":
             return default
+
         if value not in choices:
-            raise ValueError(f"Expected one of: {', '.join(choices)}")
+            raise ValueError(
+                f"Expected one of: {', '.join(choices)}"
+            )
+
         return value
 
     def set_time(self) -> None:
@@ -571,6 +930,7 @@ Readline features:
         from datetime import datetime
 
         now = datetime.now()
+
         self.plc.write("D8015", now.year % 100)
         self.plc.write("D8016", now.month)
         self.plc.write("D8017", now.day)
@@ -602,6 +962,7 @@ Readline features:
             return
 
         print(f"Running diagnostic: {debug_script}")
+
         was_connected = self.plc is not None
 
         if was_connected:
@@ -609,6 +970,7 @@ Readline features:
 
         env = os.environ.copy()
         old_pythonpath = env.get("PYTHONPATH", "")
+
         env["PYTHONPATH"] = (
             str(project_root)
             if not old_pythonpath
@@ -622,7 +984,11 @@ Readline features:
                 env=env,
                 check=False,
             )
-            print(f"Diagnostic finished with exit code {result.returncode}")
+
+            print(
+                f"Diagnostic finished with exit code "
+                f"{result.returncode}"
+            )
 
         except Exception as exc:
             print(f"Failed to run diagnostic: {exc}")
@@ -632,10 +998,13 @@ Readline features:
                 try:
                     self.connect()
                 except Exception as exc:
-                    print(f"Could not reconnect automatically: {exc}")
+                    print(
+                        f"Could not reconnect automatically: {exc}"
+                    )
 
     def connect(self) -> None:
         self.disconnect()
+
         self.plc = MiSmSerial(
             port=self.config.port,
             device=self.config.device,
@@ -647,9 +1016,11 @@ Readline features:
             debug=self.config.debug,
             bcc_mode=self.config.bcc_mode,
         )
+
         print(
             f"Connected to {self.config.port} "
-            f"(baud={self.config.baud}, device={self.config.device}, "
+            f"(baud={self.config.baud}, "
+            f"device={self.config.device}, "
             f"bcc_mode={self.config.bcc_mode})"
         )
 
@@ -661,87 +1032,136 @@ Readline features:
                 self.plc = None
                 print("Disconnected.")
 
-    def execute_plc_command(self, cmd: str, args: list[str]) -> None:
+    def execute_plc_command(
+        self,
+        cmd: str,
+        args: list[str],
+        echo: bool = True,
+    ) -> Any:
         assert self.plc is not None
+        result: Any = None
 
         if cmd == "read":
             self.require_args(cmd, args, 1)
-            print(self.plc.read(args[0]))
-            return
+            result = self.plc.read(args[0])
 
-        if cmd == "write":
+        elif cmd == "write":
             self.require_args(cmd, args, 2)
             value = self.parse_value(args[1])
-            print(self.plc.write(args[0], int(value)))
-            return
+            result = self.plc.write(args[0], int(value))
 
-        if cmd == "read_bit":
+        elif cmd == "read_bit":
             self.require_args(cmd, args, 1)
-            print(self.plc.read_bit(args[0]))
-            return
+            result = self.plc.read_bit(args[0])
 
-        if cmd == "write_bit":
+        elif cmd == "write_bit":
             self.require_args(cmd, args, 2)
-            print(self.plc.write_bit(args[0], int(self.parse_value(args[1]))))
-            return
+            value = int(self.parse_value(args[1]))
+            result = self.plc.write_bit(args[0], value)
 
-        if cmd == "input":
+        elif cmd == "input":
             self.require_args(cmd, args, 1)
             io_arg = self.parse_io_arg(args[0])
-            print(self.plc.input(io_arg))
-            return
+            result = self.plc.input(io_arg)
 
-        if cmd == "output":
+        elif cmd == "output":
             self.require_args(cmd, args, 2)
             io_arg = self.parse_io_arg(args[0])
-            print(self.plc.output(io_arg, int(self.parse_value(args[1]))))
-            return
+            value = int(self.parse_value(args[1]))
+            result = self.plc.output(io_arg, value)
 
-        if cmd == "read_float":
+        elif cmd == "read_float":
             self.require_args(cmd, args, 1)
-            endian = int(self.parse_value(args[1])) if len(args) > 1 else 0
-            print(self.plc.read_float(args[0], endian=endian))
-            return
+            endian = (
+                int(self.parse_value(args[1]))
+                if len(args) > 1
+                else 0
+            )
+            result = self.plc.read_float(
+                args[0],
+                endian=endian,
+            )
 
-        if cmd == "write_float":
+        elif cmd == "write_float":
             self.require_args(cmd, args, 2)
             value = float(self.parse_value(args[1]))
-            endian = int(self.parse_value(args[2])) if len(args) > 2 else 0
-            print(self.plc.write_float(args[0], value, endian=endian))
-            return
+            endian = (
+                int(self.parse_value(args[2]))
+                if len(args) > 2
+                else 0
+            )
+            result = self.plc.write_float(
+                args[0],
+                value,
+                endian=endian,
+            )
 
-        if cmd == "read_timer":
-            tnum = int(self.parse_value(args[0])) if args else 0
-            count = int(self.parse_value(args[1])) if len(args) > 1 else 1
-            print(self.plc.read_timer(tnum, count))
-            return
+        elif cmd == "read_timer":
+            tnum = (
+                int(self.parse_value(args[0]))
+                if args
+                else 0
+            )
+            count = (
+                int(self.parse_value(args[1]))
+                if len(args) > 1
+                else 1
+            )
+            result = self.plc.read_timer(tnum, count)
 
-        if cmd == "write_counter":
+        elif cmd == "write_counter":
             self.require_args(cmd, args, 2)
             cnum = int(self.parse_value(args[0]))
             preset = int(self.parse_value(args[1]))
-            print(self.plc.write_counter(cnum, preset))
-            return
+            result = self.plc.write_counter(cnum, preset)
 
-        if cmd == "read_error":
-            addr = int(self.parse_value(args[0])) if len(args) > 0 else 0
-            nbytes = int(self.parse_value(args[1])) if len(args) > 1 else 12
-            print(self.plc.read_error(addr, nbytes))
-            return
+        elif cmd == "read_error":
+            addr = (
+                int(self.parse_value(args[0]))
+                if len(args) > 0
+                else 0
+            )
+            nbytes = (
+                int(self.parse_value(args[1]))
+                if len(args) > 1
+                else 12
+            )
+            result = self.plc.read_error(addr, nbytes)
 
-        if hasattr(self.plc, cmd):
+        elif hasattr(self.plc, cmd):
             method = getattr(self.plc, cmd)
-            parsed_args = [self.parse_value(a) for a in args]
+
+            if not callable(method):
+                raise ValueError(
+                    f"Unknown command: {cmd}. Type 'help' or 'methods'."
+                )
+
+            parsed_args = [
+                self.parse_value(arg)
+                for arg in args
+            ]
             result = method(*parsed_args)
-            if result is not None:
-                print(result)
-            return
 
-        print(f"Unknown command: {cmd}. Type 'help' or 'methods'.")
+        else:
+            raise ValueError(
+                f"Unknown command: {cmd}. Type 'help' or 'methods'."
+            )
 
-    def require_args(self, cmd: str, args: list[str], min_count: int) -> None:
+        if echo and result is not None:
+            print(result)
+
+        return result
+
+    def require_args(
+        self,
+        cmd: str,
+        args: list[str],
+        min_count: int,
+    ) -> None:
         if len(args) < min_count:
-            raise ValueError(f"{cmd} needs at least {min_count} argument(s)")
+            raise ValueError(
+                f"{cmd} needs at least {min_count} argument(s)"
+            )
 
     def parse_io_arg(self, raw: str) -> Any:
         return int(raw) if raw.isdigit() else raw
@@ -755,10 +1175,13 @@ Readline features:
         try:
             if text.startswith(("0x", "0X")):
                 return int(text, 16)
+
             if text.startswith(("0b", "0B")):
                 return int(text, 2)
+
             if text.startswith(("0o", "0O")):
                 return int(text, 8)
+
         except ValueError:
             pass
 

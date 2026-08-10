@@ -1,0 +1,36 @@
+echo Welcome to hoc_tui.py!! LOL
+print Ah FFFFUUU I just rememberd theres a bug in the force function
+# inline comments not allowed
+# cascade Transistor array 3 times
+for i 1 3
+    for q 30 37
+        # Turn T08P4 outputs on
+        echo setting output Q00$q 1
+        output Q00$q 1
+        sleep 0.5
+    end
+
+    sleep 3
+
+    for q 30 37
+        # Turn T08P4 outputs off
+        echo setting output Q00$q 0
+        output Q00$q 0
+        sleep 0.5
+    end
+end 
+
+read D100
+
+# Conditional syntax still being worked out:
+write D100 690
+read D100
+sleep 3
+
+if read D100 > 250
+     print D100 is above 250
+     write D100 67
+     echo D100 is now 67
+ end
+
+read D100
