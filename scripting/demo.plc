@@ -1,0 +1,144 @@
+# IDEC-TUI scripting language demonstration
+#
+# Requires only a base PLC CPU.
+# Uses:
+#   - print
+#   - get-time
+#   - lshw
+#   - register reads/writes
+#   - bit reads/writes
+#   - floating point
+#   - block reads
+#   - input reads
+#   - output control
+#   - variables
+#   - for loops
+#   - nested loops
+#   - if / else
+#   - sleep
+#
+# D0100-D0103, D0200-D0201, and M0100 are used as demo storage.
+#
+# WARNING:
+# Q0-Q3 are physical outputs.
+# Run this section only on a bench PLC or otherwise safe equipment.
+
+
+print ==========================================
+print IDEC-TUI scripting language demonstration
+print ==========================================
+
+print
+print --- PLC information ---
+
+get-time
+lshw
+
+
+print
+print --- Read onboard inputs ---
+
+for i 0 3
+    print Reading input I$i
+    input I$i
+end
+
+
+print
+print --- Variable substitution and register writes ---
+
+for r 100 103
+    print Writing value $r to D0$r
+    write D0$r $r
+end
+
+
+print
+print --- Block read through MiSmSerial ---
+
+read_block D0100 4
+
+
+print
+print --- Conditional register test ---
+
+if read D0100 == 100
+    print D0100 contains the expected value
+else
+    print ERROR: D0100 did not contain the expected value
+end
+
+
+print
+print --- Internal bit test ---
+
+write_bit M0100 1
+
+if read_bit M0100 == 1
+    print M0100 successfully turned ON
+else
+    print ERROR: M0100 did not turn ON
+end
+
+write_bit M0100 0
+
+if read_bit M0100 == 0
+    print M0100 successfully turned OFF
+else
+    print ERROR: M0100 did not turn OFF
+end
+
+
+print
+print --- Floating point access ---
+
+write_float D0200 12.5
+print Value stored in D0200:
+read_float D0200
+
+
+print
+print --- Input-dependent logic ---
+
+if input I0 == 1
+    print I0 is ON
+else
+    print I0 is OFF
+end
+
+
+print
+print --- Nested loops and physical outputs ---
+print Two sweeps across Q0 through Q3
+
+for pass 1 2
+    print Starting output sweep $pass
+
+    for q 0 3
+        print Pulsing Q$q
+        output Q$q 1
+        sleep 0.20
+        output Q$q 0
+        sleep 0.10
+    end
+
+end
+
+
+print
+print --- Conditional physical I/O ---
+
+if input I0 == 1
+    print I0 is ON - pulsing Q0
+    output Q0 1
+    sleep 0.50
+    output Q0 0
+else
+    print I0 is OFF - Q0 will not be pulsed
+end
+
+
+print
+print ==========================================
+print IDEC-TUI demonstration complete
+print ==========================================

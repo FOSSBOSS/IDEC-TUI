@@ -1,0 +1,240 @@
+# IDEC-TUI feature demonstration
+#
+# This script demonstrates several higher-level IDEC-TUI features.
+#
+# WARNING:
+# Q0 will be physically forced ON and OFF during this demonstration.
+# Only run this on a PLC where operating Q0 is safe.
+
+print ==================================================
+print IDEC-TUI FEATURE DEMONSTRATION
+print ==================================================
+print
+print This script will demonstrate:
+print - terminal status
+print - terminal clear
+print - PLC hardware listing
+print - PLC clock reading
+print - PLC clock setting
+print - PLC diagnostics
+print - Force I/O
+print - Release Force I/O
+print
+print WARNING: Q0 will be physically forced during this demo.
+print
+print Demonstration begins in 5 seconds...
+sleep 5
+clear
+
+# --------------------------------------------------
+# STATUS
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: status
+print ==================================================
+print
+print The status command displays the current IDEC-TUI
+print connection configuration and connection state.
+print
+print Running status in 3 seconds...
+sleep 3
+
+status
+
+sleep 3
+clear
+
+# --------------------------------------------------
+# CLEAR
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: clear
+print ==================================================
+print
+print The clear command clears the IDEC-TUI terminal.
+print
+print The screen will clear in 3 seconds...
+sleep 3
+
+clear
+
+print
+print Terminal cleared successfully.
+sleep 3
+
+
+# --------------------------------------------------
+# HARDWARE INVENTORY
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: lshw
+print ==================================================
+print
+print lshw reads the PLC CPU type and connected
+print expansion module information.
+print
+print Reading PLC hardware in 3 seconds...
+sleep 3
+
+lshw
+
+sleep 4
+clear
+
+# --------------------------------------------------
+# GET PLC TIME
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: get-time
+print ==================================================
+print
+print get-time reads the current date and time
+print directly from the PLC clock.
+print
+print Reading PLC time in 3 seconds...
+sleep 3
+
+get-time
+
+sleep 3
+clear
+
+# --------------------------------------------------
+# SET PLC TIME
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: set-time
+print ==================================================
+print
+print set-time will synchronize the PLC clock
+print with the current computer time.
+print
+print Setting PLC time in 3 seconds...
+sleep 3
+
+set-time
+
+print
+print Reading the PLC clock back for verification...
+sleep 2
+
+get-time
+
+sleep 4
+clear
+
+# --------------------------------------------------
+# PLC DIAGNOSTIC
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: check
+print ==================================================
+print
+print check runs the IDEC PLC diagnostic utility.
+print It reports PLC status and detected error conditions.
+print
+print Running PLC diagnostics in 3 seconds...
+sleep 3
+
+check
+
+print
+print Diagnostic complete.
+sleep 4
+clear
+
+# --------------------------------------------------
+# FORCE OUTPUT ON
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: force
+print ==================================================
+print
+print WARNING: The next command controls physical output Q0.
+print
+print IDEC Force I/O overrides normal PLC control of the output.
+print
+print Q0 will be FORCED ON in 5 seconds.
+sleep 5
+
+force Q0 1
+
+print
+print Q0 is now FORCED ON.
+print It will remain ON for 3 seconds...
+sleep 3
+
+
+# --------------------------------------------------
+# FORCE OUTPUT OFF
+# --------------------------------------------------
+
+print
+print Q0 will now be FORCED OFF.
+sleep 2
+
+force Q0 0
+
+print
+print Q0 is now FORCED OFF.
+sleep 3
+clear
+
+# --------------------------------------------------
+# RELEASE FORCE I/O
+# --------------------------------------------------
+
+print
+print ==================================================
+print FEATURE: release_force
+print ==================================================
+print
+print Q0 is still under Force I/O control even though
+print its forced state is currently OFF.
+print
+print release_force disables Force I/O and returns
+print output control to the PLC program.
+print
+print Releasing Force I/O in 3 seconds...
+sleep 3
+
+release_force
+
+print
+print Force I/O released.
+sleep 3
+clear
+
+# --------------------------------------------------
+# COMPLETE
+# --------------------------------------------------
+
+print
+print ==================================================
+print IDEC-TUI FEATURE DEMONSTRATION COMPLETE
+print ==================================================
+print
+print Demonstrated:
+print - status
+print - clear
+print - lshw
+print - get-time
+print - set-time
+print - check
+print - force
+print - release_force
+print
