@@ -16,7 +16,7 @@ What it does:
     - M8005 data link communication error flag
     - M8006 data link communication stopped flag
     - M8255 SD card transfer/upload/download execution error flag
-    - D8056 raw value
+    - D8056 battery voltage (mV)
     - D8029 firmware version (/100)
     - PLC date/time
     - active outputs Y0-Y7
@@ -34,13 +34,14 @@ NOTES:
 
 https://lit.stromquist.com/docs/IDEC/KIT-FC6A_UserMan.pdf
 page 368 Device IDs for expansion slots.
-D8002 CPU type. Legacy values identify CPU class, not exact generation.
+D8000, D8002 CPU IDs. TODO: locate product IDS for CPU IDs.
 """
 
 import sys
 import platform
 from datetime import datetime
 from enum import IntFlag
+#from utils.setTime import set_time
 
 try:
     import serial
@@ -73,15 +74,14 @@ PORT_HINTS = [
 OUTPUT_BITS = [f"Y{i}" for i in range(8)]
 
 PLC_TIME_REGS = {
-    "year": "D8008",
-    "month": "D8009",
-    "day": "D8010",
-    "weekday": "D8011",
-    "hour": "D8012",
-    "minute": "D8013",
-    "second": "D8014",
+    "year": "D8015",
+    "month": "D8016",
+    "day": "D8017",
+    "weekday": "D8018",
+    "hour": "D8019",
+    "minute": "D8020",
+    "second": "D8021",
 }
-
 
 
 class D8005Error(IntFlag):
@@ -489,221 +489,7 @@ def print_d8006_report(status_bits, d8006_info):
     print(f"D8006 code: {d8006_info['raw']}")
     print(f"D8006 meaning: {d8006_info['text']}")
 
-# MODULE and CPU Detection Helpers
 
-def safe_read_block(plc, register, count):
-    if hasattr(plc, "read_block"):
-        return plc.read_block(register, count=count)
-
-    prefix = register[0].upper()
-    start = int(register[1:])
-
-    return [
-        int(safe_read_word(plc, f"{prefix}{start + offset:04d}"))
-        for offset in range(count)
-    ]
-
-
-def describe_cpu_type(cpu_type):
-    if cpu_type in FC6A_CPU_TYPES:
-        return (
-            FC6A_CPU_TYPES[cpu_type],
-            None,
-        )
-
-    if cpu_type in LEGACY_CPU_TYPES:
-        return (
-            "FC5A or earlier CPU detected",
-            LEGACY_CPU_TYPES[cpu_type],
-        )
-
-    return (
-        f"Unknown CPU type 0x{cpu_type:04X}",
-        None,
-    )
-
-
-def software_version(raw):
-    return f"{int(raw) / 100:.2f}"
-
-
-def module_status_text(status):
-    return FC6A_MODULE_STATUS.get(
-        status,
-        f"Unknown status 0x{status:02X}",
-    )
-
-
-
-def print_expansion_module(slot, info_register, info, detail):
-    type_id = info & 0xFF
-    status = (info >> 8) & 0xFF
-
-    if type_id == 0xFF:
-        print(
-            f"  Expansion slot {slot}: "
-            "Legacy or unidentified expansion module | "
-            f"{module_status_text(status)} | "
-            f"D{info_register:04d}=0x{info:04X}, "
-            f"D{info_register + 1:04d}=0x{detail:04X}"
-        )
-        return True  # maybe False
-
-    model = FC6A_MODULE_TYPES.get(
-        type_id,
-        f"Unknown module type ID 0x{type_id:02X}",
-    )
-
-    # In the newer FC6A register layout:
-    #   high byte: node/slot position
-    #   low byte: module system software version
-    position = (detail >> 8) & 0xFF
-    node = (position >> 4) & 0x0F
-    node_slot = position & 0x0F
-    version = detail & 0xFF
-
-    print(
-        f"  Expansion slot {slot}: {model} | "
-        f"{module_status_text(status)} | "
-        f"node {node}, node slot {node_slot} | "
-        f"software {software_version(version)} | "
-        f"D{info_register:04d}=0x{info:04X}, "
-        f"D{info_register + 1:04d}=0x{detail:04X}"
-    )
-    return True
-
-
-
-def print_expansion_inventory(plc):
-    try:
-        connected = int(safe_read_word(plc, "D8037"))
-    except Exception as exc:
-        print(f"  Expansion module count unavailable: {exc}")
-        return 0
-
-    print(f"  Connected expansion modules: {connected} (D8037)")
-
-    if connected <= 0:
-        return 0
-
-    if connected > 63:
-        print(f"  Invalid expansion module count: {connected}")
-        return 0
-
-    try:
-        expansion_data = safe_read_block(
-            plc,
-            "D8470",
-            connected * 2,
-        )
-    except Exception as exc:
-        print(f"  Expansion module information unavailable: {exc}")
-        return 0
-
-    installed = 0
-
-    for slot in range(1, connected + 1):
-        offset = (slot - 1) * 2
-        register = 8470 + offset
-
-        if print_expansion_module(
-            slot,
-            register,
-            expansion_data[offset],
-            expansion_data[offset + 1],
-        ):
-            installed += 1
-
-    return installed
-
-
-
-def print_hardware_inventory(plc):
-    print("Hardware inventory:")
-
-    try:
-        cpu_type = int(safe_read_word(plc, "D8002"))
-    except Exception as exc:
-        print(f"  CPU type unavailable: {exc}")
-    else:
-        print(f"  CPU type D8002: 0x{cpu_type:04X} ({cpu_type})")
-
-        description, cpu_class = describe_cpu_type(cpu_type)
-        print(f"  CPU: {description}")
-
-        if cpu_class is not None:
-            print(f"  CPU class: {cpu_class}")
-
-    installed = print_expansion_inventory(plc)
-    if not installed:
-        print("  No identifiable expansion modules reported.")
-
-
-# CPU type mappings.
-#
-# D8002 values 0, 1, 2, 3, 4, and 6 use the legacy MicroSmart CPU
-# type scheme. They identify the CPU class, but not the exact FC3A,
-# FC4A, or FC5A generation.
-LEGACY_CPU_TYPES = {
-    0x00: "10-I/O",
-    0x01: "16-I/O",
-    0x02: "20-I/O transistor output",
-    0x03: "24-I/O",
-    0x04: "40-I/O",
-    0x06: "20-I/O relay output",
-}
-
-# These FC6A values do not overlap with the legacy CPU type scheme.
-FC6A_CPU_TYPES = {
-    0x12: "FC6A CAN J1939 All-in-One 40-I/O CPU",
-    0x20: "FC6A Plus 16-I/O CPU",
-    0x21: "FC6A Plus 32-I/O CPU",
-}
-
-FC6A_MODULE_TYPES = {
-    0x00: "FC6A-N16B1, FC6A-N16B3",
-    0x01: (
-        "FC6A-R161, FC6A-T16K1, FC6A-T16P1, "
-        "FC6A-T16K3, FC6A-T16P3"
-    ),
-    0x02: "FC6A-N32B3",
-    0x03: "FC6A-T32K3, FC6A-T32P3",
-    0x04: "FC6A-N08B1, FC6A-N08A11",
-    0x05: "FC6A-R081, FC6A-T08K1, FC6A-T08P1",
-    0x06: "FC6A-M08BR1",
-    0x07: "FC6A-M24BR1",
-    0x18: "FC6A-PH1",
-    0x19: "FC6A-EXM2",
-    0x1A: "FC6A-EXM1S",
-    0x20: "FC6A-J2C1",
-    0x21: "FC6A-J4A1",
-    0x22: "FC6A-J8A1",
-    0x24: "FC6A-K4A1",
-    0x25: "FC6A-L06A1",
-    0x26: "FC6A-L03CN1",
-    0x27: "FC6A-J4CN1",
-    0x28: "FC6A-J8CU1",
-    0x29: "FC6A-F2M1",
-    0x2A: "FC6A-F2MR1",
-    0x2B: "FC6A-J4CH1Y",
-    0x2C: "FC6A-EXM1M",
-    0x2E: "FC6A-SIF52",
-}
-
-
-FC6A_MODULE_STATUS = {
-    0x00: "OK",
-    0x81: "Communication error",
-    0x82: "Unknown device detected",
-    0x83: "Device setting error",
-    0x84: "Device writing error",
-}
-
-
-
-
-
-####################### MAIN ##############################
 def main():
     host_now = datetime.now()
     os_name, os_release, _ = detect_os()
@@ -716,6 +502,11 @@ def main():
     if not ports:
         print("Connectivity failure: no serial devices found on this system.")
         sys.exit(2)
+
+    #print("Available serial devices:")
+    #for p in ports:
+    #    print(f"  {p['device']:<18} {p['description']}")
+    #print()
 
     plc = None
     chosen = None
@@ -740,6 +531,7 @@ def main():
     status_bits = read_status_bits(plc)
     d8005_info = read_d8005_errors(plc)
     d8006_info = read_d8006_error(plc) if status_bits["M8004"]["value"] is True else None
+    battery_info = read_battery(plc)
     firmware_info = read_firmware_version(plc)
     plc_time_info = read_plc_datetime(plc)
     active_outputs, failed_outputs = read_outputs(plc)
@@ -751,8 +543,6 @@ def main():
     print("PLC report")
     print("----------")
     print("Connectivity: good")
-    print_hardware_inventory(plc)
-    print()
     print_status_bits(status_bits)
     print()
 
@@ -771,11 +561,10 @@ def main():
 
     print()
 
-    battery_info = read_battery(plc)
     if battery_info["readable"]:
-        print(f"D8056 raw: {battery_info['raw_mv']} (not interpreted)")
+        print(f"Battery: {battery_info['text']} (D8056={battery_info['raw_mv']} mV)")
     else:
-        print(f"D8056: unavailable ({battery_info['error']})")
+        print(f"Battery: unavailable ({battery_info['error']})")
 
     if firmware_info["readable"]:
         print(f"Firmware version: {firmware_info['text']} (D8029={firmware_info['raw']})")

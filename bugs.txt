@@ -1,0 +1,27 @@
+$ python3 hoc_tui.py check
+PLC Terminal [2026-08-10-v2]
+Type 'help' for help, 'config' to configure the port, 'q' to quit.
+History file: /home/l/.plc_terminal_history
+plc[disconnected]> get-time
+Error: 'NoneType' object has no attribute 'read'
+plc[disconnected]> set-time
+Error: 'NoneType' object has no attribute 'write' <-- not an error, but could be more descriptive of the actual problem.
+
+(but that is a general purpose error for a specific issue, so fixin it might suck )
+
+## we prolly have this
+plc[connected]> read_bit Y0030
+1
+plc[connected]> output Q0030 0
+0
+plc[connected]> read_bit Y0030 <--litteral Maintenance Protocol command
+0
+plc[connected]> read_bit Q0030 <-- Q should be bound to Y 
+Error: bit dtype must be X/Y/M/R (or x/y/m/r)
+Q should be bound to Y, in ouput, it is but in read it is not. 
+## Check input for the same problem. 
+
+
+Tue Aug 11 06:47:52 PM EDT 2026
+# fixed utils
+# fixed the force bug

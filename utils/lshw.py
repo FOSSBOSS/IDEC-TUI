@@ -1,20 +1,64 @@
 #!/usr/bin/env python3
 """
-IDEC PLC hardware inventory.
+lshw.py
 
-Reads CPU and expansion-module information from an already connected
-MiSmSerial-compatible PLC object.
+List IDEC PLC CPU and expansion-module hardware.
 
-Registers:
+The hardware inventory is read from:
     D8002   CPU type
     D8037   Connected expansion-module count
     D8470+  Expansion-module information
+
+This module can be:
+    1. Run directly as a standalone serial utility.
+    2. Imported by IDEC-TUI and called with an existing PLC connection.
+
+Requirements:
+    - Python 3
+    - pyserial
+    - MiSmSerial.py in the IDEC-TUI project root or on PYTHONPATH
+
+Reference:
+    FC6A User Manual, page 368 - Device IDs for expansion slots.
 """
 
+import sys
+from pathlib import Path
 
-# D8002 values 0, 1, 2, 3, 4, and 6 use the legacy MicroSmart CPU
-# type scheme. They identify the CPU class, but not the exact FC3A,
-# FC4A, or FC5A generation.
+try:
+    import serial
+    from serial.tools import list_ports
+except ImportError:
+    print("Connectivity failure: pyserial is not installed.")
+    print("Install with: pip install pyserial")
+    sys.exit(1)
+
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+try:
+    from MiSmSerial import MiSmSerial
+except ImportError:
+    print("Connectivity failure: MiSmSerial.py could not be imported.")
+    print("Make sure MiSmSerial.py is in the project root or on PYTHONPATH.")
+    sys.exit(1)
+
+
+DEVICE = "FF"
+BAUD = 9600
+DEBUG = False
+
+PORT_HINTS = [
+    "/dev/ttyACM",
+    "/dev/ttyUSB",
+    "COM",
+    "/dev/cu.usb",
+    "/dev/tty.usb",
+]
+
+
 LEGACY_CPU_TYPES = {
     0x00: "10-I/O",
     0x01: "16-I/O",
@@ -25,7 +69,6 @@ LEGACY_CPU_TYPES = {
 }
 
 
-# FC6A values that do not overlap with the legacy CPU type scheme.
 FC6A_CPU_TYPES = {
     0x12: "FC6A CAN J1939 All-in-One 40-I/O CPU",
     0x20: "FC6A Plus 16-I/O CPU",
@@ -76,13 +119,9 @@ FC6A_MODULE_STATUS = {
 def safe_read_word(plc, register):
     if hasattr(plc, "read_word"):
         return plc.read_word(register)
-
     if hasattr(plc, "read"):
         return plc.read(register)
-
-    raise AttributeError(
-        "PLC object has no read_word() or read() method"
-    )
+    raise AttributeError("MiSmSerial instance has no read_word() or read()")
 
 
 def safe_read_block(plc, register, count):
@@ -120,6 +159,9 @@ def module_status_text(status):
 
 
 def print_expansion_module(slot, info_register, info, detail):
+    info = int(info)
+    detail = int(detail)
+
     type_id = info & 0xFF
     status = (info >> 8) & 0xFF
 
@@ -138,9 +180,6 @@ def print_expansion_module(slot, info_register, info, detail):
         f"Unknown module type ID 0x{type_id:02X}",
     )
 
-    # Newer FC6A register layout:
-    #   high byte: node/slot position
-    #   low byte: module system software version
     position = (detail >> 8) & 0xFF
     node = (position >> 4) & 0x0F
     node_slot = position & 0x0F
@@ -154,7 +193,6 @@ def print_expansion_module(slot, info_register, info, detail):
         f"D{info_register:04d}=0x{info:04X}, "
         f"D{info_register + 1:04d}=0x{detail:04X}"
     )
-
     return True
 
 
@@ -165,7 +203,7 @@ def print_expansion_inventory(plc):
         print(f"  Expansion module count unavailable: {exc}")
         return 0
 
-    print(f"  Connected expansion modules: {connected} (D8037)")
+    print(f"  Connected expansion modules: {connected}") # D8037
 
     if connected <= 0:
         return 0
@@ -201,7 +239,7 @@ def print_expansion_inventory(plc):
     return installed
 
 
-def print_hardware_inventory(plc):
+def hardware_inventory(plc):
     print("Hardware inventory:")
 
     try:
@@ -209,7 +247,7 @@ def print_hardware_inventory(plc):
     except Exception as exc:
         print(f"  CPU type unavailable: {exc}")
     else:
-        print(f"  CPU type D8002: 0x{cpu_type:04X} ({cpu_type})")
+        #print(f"  CPU type D8002: 0x{cpu_type:04X} ({cpu_type})")
 
         description, cpu_class = describe_cpu_type(cpu_type)
         print(f"  CPU: {description}")
@@ -221,3 +259,114 @@ def print_hardware_inventory(plc):
 
     if not installed:
         print("  No identifiable expansion modules reported.")
+
+
+def list_candidate_ports():
+    ports = []
+
+    for port in list_ports.comports():
+        ports.append({
+            "device": port.device,
+            "description": port.description,
+            "hwid": port.hwid,
+        })
+
+    def rank_port(port_name):
+        for index, hint in enumerate(PORT_HINTS):
+            if hint in port_name:
+                return index
+        return 999
+
+    ports.sort(key=lambda item: (rank_port(item["device"]), item["device"]))
+    return ports
+
+
+def try_open_port_raw(port_name, baud=BAUD, timeout=0.5):
+    try:
+        ser = serial.Serial(
+            port=port_name,
+            baudrate=baud,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_ODD,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=timeout,
+            write_timeout=timeout,
+        )
+        ser.close()
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def probe_plc_on_port(port_name):
+    result = {
+        "port": port_name,
+        "connected": False,
+        "reason": "",
+    }
+
+    ok, error = try_open_port_raw(port_name)
+    if not ok:
+        result["reason"] = f"serial open failed: {error}"
+        return None, result
+
+    try:
+        plc = MiSmSerial(port_name, device=DEVICE, debug=DEBUG)
+    except TypeError:
+        try:
+            plc = MiSmSerial(port_name, device=DEVICE)
+        except Exception as exc:
+            result["reason"] = f"MiSmSerial init failed: {exc}"
+            return None, result
+    except Exception as exc:
+        result["reason"] = f"MiSmSerial init failed: {exc}"
+        return None, result
+
+    try:
+        safe_read_word(plc, "D8002")
+        result["connected"] = True
+        result["reason"] = "responded to D8002"
+        return plc, result
+    except Exception as exc:
+        result["reason"] = f"opened serial port, but D8002 read failed: {exc}"
+        return None, result
+
+
+def main():
+    ports = list_candidate_ports()
+
+    if not ports:
+        print("Connectivity failure: no serial devices found on this system.")
+        sys.exit(2)
+
+    plc = None
+    chosen = None
+    failures = []
+
+    for port in ports:
+        tested_plc, result = probe_plc_on_port(port["device"])
+
+        if result["connected"]:
+            plc = tested_plc
+            chosen = result
+            break
+
+        failures.append(result)
+
+    if plc is None:
+        print("Connectivity failure: no responsive PLC found.")
+        print()
+        print("Probe summary:")
+
+        for failure in failures:
+            print(f"  {failure['port']}: {failure['reason']}")
+
+        sys.exit(3)
+
+    print(f"PLC connection: OK on {chosen['port']} ({chosen['reason']})")
+    print()
+    hardware_inventory(plc)
+
+
+if __name__ == "__main__":
+    main()

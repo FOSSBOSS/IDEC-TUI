@@ -25,7 +25,9 @@ Notes:
 """
 
 from __future__ import annotations
-
+from utils.lshw import hardware_inventory
+from utils.setTime import set_time
+from utils.get_time import get_time
 import ast
 import atexit
 import json
@@ -62,20 +64,22 @@ CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
 
 BUILTIN_COMMANDS = [
-    "help",
-    "methods",
     "check",
-    "set-time",
+    "clear",
     "config",
     "connect",
     "disconnect",
-    "status",
-    "clear",
-    "run",
-    "sleep",
+    "exit",
+    "get-time",
+    "help",
+    "lshw",
+    "methods",
     "q",
     "quit",
-    "exit",
+    "run",
+    "set-time",
+    "sleep",
+    "status",
 ]
 
 PLC_COMMANDS = [
@@ -447,7 +451,12 @@ class PLCTerminalApp:
             return
 
         if cmd == "set-time":
-            self.set_time()
+            #self.set_time()
+            set_time(self.plc)
+            return
+
+        if cmd == "get-time":
+            get_time(self.plc)
             return
 
         if cmd == "config":
@@ -482,6 +491,10 @@ class PLCTerminalApp:
 
         if cmd in {"print", "echo"}:
             print(" ".join(args))
+            return
+
+        if cmd == "lshw":
+            hardware_inventory(self.plc)
             return
 
         if self.plc is None:
