@@ -9,3 +9,4 @@ we're writing some utility functions.
 | `check`  | `debug.py`     | Check the PLC status and error bits.     |
 | TBD      | `pass_stat.py` | Check the status of the security bit.    |
 | `lshw`   | `lshw.py`      | List the PLC CPU and expansion modules.  |
+| `set-time`| `setTime.py`  | Set the PLC time to PC time              |
