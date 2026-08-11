@@ -58,7 +58,7 @@ except ImportError:
     readline = None
 
 
-SCRIPT_BUILD = "2026-08-10-v2"
+SCRIPT_BUILD = "2026-08-11"
 
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
@@ -934,32 +934,7 @@ Features:
             )
 
         return value
-
-    def set_time(self) -> None:
-        if self.plc is None:
-            print("Not connected. Run 'config' and then 'connect' first.")
-            return
-
-        from datetime import datetime
-
-        now = datetime.now()
-
-        self.plc.write("D8015", now.year % 100)
-        self.plc.write("D8016", now.month)
-        self.plc.write("D8017", now.day)
-        self.plc.write("D8018", now.weekday())
-        self.plc.write("D8019", now.hour)
-        self.plc.write("D8020", now.minute)
-        self.plc.write("D8021", now.second)
-        self.plc.write_bit("M8020", 1)
-        self.plc.write_bit("M8020", 0)
-
-        print(
-            "PLC time set to: "
-            f"{now.year:04d}-{now.month:02d}-{now.day:02d} "
-            f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}"
-        )
-
+    
     def clear(self) -> None:
         if os.name == "nt":
             os.system("cls")
