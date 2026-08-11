@@ -955,7 +955,7 @@ Features:
 
     def run_check(self) -> None:
         project_root = Path(__file__).resolve().parent
-        debug_script = project_root / "SERIAL" / "debug.py"
+        debug_script = project_root / "utils" / "debug.py"
 
         if not debug_script.is_file():
             print(f"Could not find diagnostic: {debug_script}")
