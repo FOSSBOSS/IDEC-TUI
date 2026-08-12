@@ -25,6 +25,7 @@ Notes:
 """
 
 from __future__ import annotations
+from utils.debug import check
 from utils.lshw import hardware_inventory
 from utils.list_path import list_path
 from utils.setTime import set_time
@@ -35,7 +36,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -458,11 +458,10 @@ class PLCTerminalApp:
             return
 
         if cmd == "check":
-            self.run_check()
+            check(self.plc)
             return
 
         if cmd == "set-time":
-            #self.set_time()
             set_time(self.plc)
             return
 
@@ -954,56 +953,7 @@ Features:
         if os.name == "nt":
             os.system("cls")
         else:
-            os.system("clear")
-
-    def run_check(self) -> None:
-        project_root = Path(__file__).resolve().parent
-        debug_script = project_root / "utils" / "debug.py"
-
-        if not debug_script.is_file():
-            print(f"Could not find diagnostic: {debug_script}")
-            return
-
-        print(f"Running diagnostic: {debug_script}")
-
-        was_connected = self.plc is not None
-
-        if was_connected:
-            self.disconnect()
-
-        env = os.environ.copy()
-        old_pythonpath = env.get("PYTHONPATH", "")
-
-        env["PYTHONPATH"] = (
-            str(project_root)
-            if not old_pythonpath
-            else f"{project_root}{os.pathsep}{old_pythonpath}"
-        )
-
-        try:
-            result = subprocess.run(
-                [sys.executable, str(debug_script)],
-                cwd=project_root,
-                env=env,
-                check=False,
-            )
-
-            print(
-                f"Diagnostic finished with exit code "
-                f"{result.returncode}"
-            )
-
-        except Exception as exc:
-            print(f"Failed to run diagnostic: {exc}")
-
-        finally:
-            if was_connected:
-                try:
-                    self.connect()
-                except Exception as exc:
-                    print(
-                        f"Could not reconnect automatically: {exc}"
-                    )
+            os.system("clear")    
 
     def connect(self) -> None:
         self.disconnect()

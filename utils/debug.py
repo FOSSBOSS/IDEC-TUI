@@ -489,7 +489,7 @@ def print_d8006_report(status_bits, d8006_info):
     print(f"D8006 code: {d8006_info['raw']}")
     print(f"D8006 meaning: {d8006_info['text']}")
 
-
+"""
 def main():
     host_now = datetime.now()
     os_name, os_release, _ = detect_os()
@@ -575,7 +575,88 @@ def main():
         print(f"PLC date/time: {plc_time_info['datetime'].strftime('%Y-%m-%d %H:%M:%S')}")
     else:
         print(f"PLC date/time: unavailable ({plc_time_info['error']})")
+"""
+def check(plc):
+    if plc is None:
+        print("Not connected. Run 'config' and then 'connect' first.")
+        return
 
+    host_now = datetime.now()
+    os_name, os_release, _ = detect_os()
+
+    print(f"Host OS: {os_name} {os_release}")
+    print(f"Host time: {host_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
+
+    status_bits = read_status_bits(plc)
+    d8005_info = read_d8005_errors(plc)
+    d8006_info = (
+        read_d8006_error(plc)
+        if status_bits["M8004"]["value"] is True
+        else None
+    )
+    battery_info = read_battery(plc)
+    firmware_info = read_firmware_version(plc)
+    plc_time_info = read_plc_datetime(plc)
+    active_outputs, failed_outputs = read_outputs(plc)
+
+    print("PLC connection: OK")
+    print(
+        "Summary: "
+        f"{summarize_primary_status(status_bits, d8005_info, d8006_info)}"
+    )
+    print()
+
+    print("PLC report")
+    print("----------")
+    print("Connectivity: good")
+    print_status_bits(status_bits)
+    print()
+
+    print_d8005_report(d8005_info)
+    print()
+    print_d8006_report(status_bits, d8006_info)
+    print()
+
+    if active_outputs:
+        print(f"Active outputs: {', '.join(active_outputs)}")
+    else:
+        print("Active outputs: none detected")
+
+    if failed_outputs:
+        print(f"Unreadable outputs: {', '.join(failed_outputs)}")
+
+    print()
+
+    if battery_info["readable"]:
+        print(
+            f"Battery: {battery_info['text']} "
+            f"(D8056={battery_info['raw_mv']} mV)"
+        )
+    else:
+        print(f"Battery: unavailable ({battery_info['error']})")
+
+    if firmware_info["readable"]:
+        print(
+            f"Firmware version: {firmware_info['text']} "
+            f"(D8029={firmware_info['raw']})"
+        )
+    else:
+        print(
+            f"Firmware version: unavailable "
+            f"({firmware_info['error']})"
+        )
+
+    if plc_time_info["readable"]:
+        print(
+            "PLC date/time: "
+            f"{plc_time_info['datetime'].strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+    else:
+        print(
+            f"PLC date/time: unavailable "
+            f"({plc_time_info['error']})"
+        )
 
 if __name__ == "__main__":
     main()

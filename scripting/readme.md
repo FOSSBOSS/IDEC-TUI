@@ -705,3 +705,27 @@ without requiring a separate Python program for every repetitive PLC test.
 IDEC-TUI provides the PLC commands.
 
 The scripting layer provides just enough logic to automate them.
+
+# Fun:
+
+Call a script from a script
+
+```code
+# a.plc
+echo a.plc
+run b.plc
+```
+
+```code
+# b.plc
+echo hello from b.plc
+
+```
+which means you can make an infinte loop and other whacky BS, 
+provided a.plc and b.plc both exist
+
+
+
+
+
+

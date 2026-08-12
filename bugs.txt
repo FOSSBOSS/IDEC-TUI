@@ -1,29 +1,15 @@
-##### Bugs
-Encounterd when trying to build releases.
-ls,lshw, get-time, set-time all succeed, but check fails.
-this is becuase check does not have an import. investigate other instances related to this
-The error:
-plc[connected]> check 
-Could not find diagnostic: C:\Users\User\AppData\Local\Temp\_MEI109242\utils\debug.py
+##### Bugs:
+--None for now..
 
-##### FIXED 
+##### FIXED: 
+# fixed debug.py util import
 # fixed relaese force in MiSmSerial (reminant) MiSmTCP was fine
 # fixed utility folder
 # fixed tab completion ?? works on my machine 
 
-##### 
+##### Improvements:
 ## Not a bug, but could handle script error on conection fault better.
 Turn t0k outputs ON # what
-setting output Q0030 1
-Not connected. Run 'config' and then 'connect' first.
-setting output Q0031 1
-Not connected. Run 'config' and then 'connect' first.
-setting output Q0032 1
-Not connected. Run 'config' and then 'connect' first.
-setting output Q0033 1
-Not connected. Run 'config' and then 'connect' first.
-setting output Q0034 1
-Not connected. Run 'config' and then 'connect' first.
 setting output Q0035 1
 Not connected. Run 'config' and then 'connect' first.
 setting output Q0036 1
