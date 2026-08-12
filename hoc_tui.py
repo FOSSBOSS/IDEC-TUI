@@ -26,6 +26,7 @@ Notes:
 
 from __future__ import annotations
 from utils.lshw import hardware_inventory
+from utils.list_path import list_path
 from utils.setTime import set_time
 from utils.get_time import get_time
 import ast
@@ -58,7 +59,7 @@ except ImportError:
     readline = None
 
 
-SCRIPT_BUILD = "2026-08-11"
+SCRIPT_BUILD = "2026-08-12"
 
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
@@ -72,6 +73,7 @@ BUILTIN_COMMANDS = [
     "exit",
     "get-time",
     "help",
+    "ls",
     "lshw",
     "methods",
     "q",
@@ -335,24 +337,8 @@ class PLCTerminalApp:
             return
 
         self._completer = PLCCompleter(self)
-
-        readline.set_completer(self._completer.complete)
-
-        # Only whitespace separates completion words.
-        readline.set_completer_delims(" \t\n")
-
-        # Bind both forms of Tab for GNU readline.
-        try:
-            readline.parse_and_bind("tab: complete")
-            readline.parse_and_bind('"\\C-i": complete')
-        except Exception as exc:
-            print(f"Warning: readline completion setup failed: {exc}")
-
-        try:
-            readline.parse_and_bind("set show-all-if-ambiguous on")
-            readline.parse_and_bind("set completion-ignore-case on")
-        except Exception:
-            pass
+        self._completion_callback = self._completer.complete
+        self._ensure_readline()
 
         if HISTORY_PATH.exists():
             try:
@@ -366,6 +352,30 @@ class PLCTerminalApp:
             pass
 
         atexit.register(self._save_history)
+
+    def _ensure_readline(self) -> None:
+        """Install completion using the syntax required by the active backend.
+
+        Readline state is process-global. Reinstalling it before each command
+        prompt repairs completion if imported code changes the completer or the
+        Tab binding after startup.
+        """
+        if readline is None:
+            return
+
+        try:
+            readline.set_completer(self._completion_callback)
+            readline.set_completer_delims(" \t\n")
+
+            if "libedit" in (readline.__doc__ or "").lower():
+                readline.parse_and_bind("bind ^I rl_complete")
+            else:
+                readline.parse_and_bind("tab: complete")
+                readline.parse_and_bind('"\\C-i": complete')
+                readline.parse_and_bind("set show-all-if-ambiguous on")
+                readline.parse_and_bind("set completion-ignore-case on")
+        except Exception as exc:
+            print(f"Warning: readline completion setup failed: {exc}")
 
     def _save_history(self) -> None:
         if readline is None:
@@ -409,6 +419,7 @@ class PLCTerminalApp:
 
         while self.running:
             try:
+                self._ensure_readline()
                 line = input(self.prompt()).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
@@ -495,6 +506,10 @@ class PLCTerminalApp:
 
         if cmd == "lshw":
             hardware_inventory(self.plc)
+            return
+
+        if cmd == "ls":
+            list_path(parts[1] if len(parts) > 1 else ".")
             return
 
         if self.plc is None:
@@ -1187,3 +1202,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

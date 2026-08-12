@@ -27,15 +27,16 @@
 print ==========================================
 print IDEC-TUI scripting language demonstration
 print ==========================================
-
-print
+sleep 3
+clear
 print --- PLC information ---
 
 get-time
 lshw
 
+sleep 3
+clear
 
-print
 print --- Read onboard inputs ---
 
 for i 0 3
@@ -43,8 +44,8 @@ for i 0 3
     input I$i
 end
 
-
-print
+sleep 3
+clear
 print --- Variable substitution and register writes ---
 
 for r 100 103
@@ -53,13 +54,15 @@ for r 100 103
 end
 
 
-print
+sleep 3
+clear
 print --- Block read through MiSmSerial ---
 
 read_block D0100 4
 
 
-print
+sleep 3
+clear
 print --- Conditional register test ---
 
 if read D0100 == 100
@@ -69,7 +72,8 @@ else
 end
 
 
-print
+sleep 3
+clear
 print --- Internal bit test ---
 
 write_bit M0100 1
@@ -88,16 +92,16 @@ else
     print ERROR: M0100 did not turn OFF
 end
 
-
-print
+sleep 3
+clear
 print --- Floating point access ---
 
 write_float D0200 12.5
 print Value stored in D0200:
 read_float D0200
 
-
-print
+sleep 3
+clear
 print --- Input-dependent logic ---
 
 if input I0 == 1
@@ -106,8 +110,8 @@ else
     print I0 is OFF
 end
 
-
-print
+sleep 3
+clear
 print --- Nested loops and physical outputs ---
 print Two sweeps across Q0 through Q3
 
@@ -124,8 +128,8 @@ for pass 1 2
 
 end
 
-
-print
+sleep 3
+clear
 print --- Conditional physical I/O ---
 
 if input I0 == 1
@@ -136,7 +140,8 @@ if input I0 == 1
 else
     print I0 is OFF - Q0 will not be pulsed
 end
-
+sleep 3
+clear
 
 print
 print ==========================================

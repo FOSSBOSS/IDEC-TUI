@@ -1,15 +1,39 @@
-$ python3 hoc_tui.py check
-PLC Terminal [2026-08-10-v2]
-Type 'help' for help, 'config' to configure the port, 'q' to quit.
-History file: /home/l/.plc_terminal_history
-plc[disconnected]> get-time
-Error: 'NoneType' object has no attribute 'read'
-plc[disconnected]> set-time
-Error: 'NoneType' object has no attribute 'write' <-- not an error, but could be more descriptive of the actual problem.
+##### Bugs
+Encounterd when trying to build releases.
+ls,lshw, get-time, set-time all succeed, but check fails.
+this is becuase check does not have an import. investigate other instances related to this
+The error:
+plc[connected]> check 
+Could not find diagnostic: C:\Users\User\AppData\Local\Temp\_MEI109242\utils\debug.py
 
-(but that is a general purpose error for a specific issue, so fixin it might suck )
+##### FIXED 
+# fixed relaese force in MiSmSerial (reminant) MiSmTCP was fine
+# fixed utility folder
+# fixed tab completion ?? works on my machine 
 
-## we prolly have this
+##### 
+## Not a bug, but could handle script error on conection fault better.
+Turn t0k outputs ON # what
+setting output Q0030 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0031 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0032 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0033 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0034 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0035 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0036 1
+Not connected. Run 'config' and then 'connect' first.
+setting output Q0037 1
+Not connected. Run 'config' and then 'connect' first.
+Error: [Errno 2] could not open port /dev/ttyACM0: [Errno 2] No such file or directory: '/dev/ttyACM0'
+
+## Not a bug, but should assign Y to Q and X to I
+       This X,Y are Maintenance Protocol, but I,Q are standard naming conventions.
 plc[connected]> read_bit Y0030
 1
 plc[connected]> output Q0030 0
@@ -20,8 +44,3 @@ plc[connected]> read_bit Q0030 <-- Q should be bound to Y
 Error: bit dtype must be X/Y/M/R (or x/y/m/r)
 Q should be bound to Y, in ouput, it is but in read it is not. 
 ## Check input for the same problem. 
-
-
-Tue Aug 11 06:47:52 PM EDT 2026
-# fixed utils
-# fixed the force bug
