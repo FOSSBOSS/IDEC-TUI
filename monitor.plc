@@ -1,0 +1,51 @@
+# Hardware IO Monitor IDEC-TUI
+
+# CPU  Stats
+P = read_bit M8125
+R = read_bit M8000
+E = read D8005
+D = read_bit M8070
+B = read D8056
+S = read_bit M8010
+
+if $B < 2000
+   K = "Bad"
+   else
+   K = "OK "
+end
+
+# Input Stats 
+I0 = read_bit X0
+I1 = read_bit X1
+I2 = read_bit X2
+I3 = read_bit X3
+I4 = read_bit X4
+I5 = read_bit X5
+I6 = read_bit X6
+I7 = read_bit X7
+
+# Output Stats
+Q0 = read_bit Y0
+Q1 = read_bit Y1
+Q2 = read_bit Y2
+Q3 = read_bit Y3
+Q4 = read_bit Y4
+Q5 = read_bit Y5
+Q6 = read_bit Y6
+Q7 = read_bit Y7
+
+# hardware monitoring frame
+
+echo "+-------------------------------------+"
+echo "| FC6A-D16RCEE stat   IN      OUT     |"
+echo "+-------------------------------------+"
+echo "|          PWR [$P] I0 [$I0] Q0 [$Q0] |"
+echo "|          RUN [$R] I1 [$I1] Q1 [$Q1] |"
+echo "|          ERR [$E] I2 [$I2] Q2 [$Q2] |"
+echo "|          SD  [$D] I3 [$I3] Q3 [$Q3] |"
+echo "|          BAT $K] I4 [$I4] Q4 [$Q4] |"
+echo "|         STAT [$S] I5 [$I5] Q5 [$Q5] |"
+echo "|                   I6 [$I6] Q6 [$Q6] |"
+echo "|                   I7 [$I7] Q7 [$Q7] |"
+echo "|                                     |"
+echo "+-------------------------------------+"
