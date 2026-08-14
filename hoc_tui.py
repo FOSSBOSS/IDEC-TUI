@@ -8,7 +8,7 @@ Adds:
 - Readline support on Linux/macOS
 - Script execution with "run <file>"
 - Script delay with "sleep <seconds>"
-- Simple for loops in script files
+- For loops, conditions, assignments, and early return in script files
 
 Script example:
 
@@ -19,7 +19,6 @@ Script example:
     end
 
 Notes:
-- The first scripting implementation intentionally does not support nested loops.
 - Script commands are passed through the same handle_line() command dispatcher
   used by the interactive terminal.
 """
@@ -59,7 +58,7 @@ except ImportError:
     readline = None
 
 
-SCRIPT_BUILD = "2026-08-12"
+SCRIPT_BUILD = "2026-08-14"
 
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
@@ -97,6 +96,11 @@ PLC_COMMANDS = [
     "write_counter",
     "read_error",
 ]
+
+
+class ScriptReturn(Exception):
+    """Stop the current script without exiting the terminal."""
+
 
 CONFIG_KEYS = [
     "port",
@@ -468,7 +472,6 @@ class PLCTerminalApp:
         if cmd == "get-time":
             get_time(self.plc)
             return
-
         if cmd == "config":
             self.configure_interactive()
             return
@@ -537,7 +540,10 @@ class PLCTerminalApp:
 
                 lines.append(line)
 
-        self.execute_script_lines(lines)
+        try:
+            self.execute_script_lines(lines)
+        except ScriptReturn:
+            pass
 
     def expand_script_vars(
         self,
@@ -552,6 +558,55 @@ class PLCTerminalApp:
 
     def script_tokens(self, line: str) -> list[str]:
         return shlex.split(line, comments=True)
+
+    def assign_script_variable(
+        self,
+        line: str,
+        variables: dict[str, Any],
+    ) -> bool:
+        match = re.match(
+            r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)\s*(.+)$",
+            line,
+        )
+
+        if match is None:
+            return False
+
+        name = match.group(1)
+        rhs = match.group(2)
+        parts = self.script_tokens(rhs)
+
+        if not parts:
+            raise ValueError(f"Missing value for assignment: {name} =")
+
+        command = parts[0].lower()
+        is_command = command in PLC_COMMANDS
+
+        if not is_command and self.plc is not None:
+            method = getattr(self.plc, command, None)
+            is_command = callable(method)
+
+        if is_command:
+            if self.plc is None:
+                raise RuntimeError(
+                    "Not connected. Run 'config' and then 'connect' first."
+                )
+
+            value = self.execute_plc_command(
+                command,
+                parts[1:],
+                echo=False,
+            )
+        else:
+            if len(parts) != 1:
+                raise ValueError(
+                    "Assignment must contain one value or a PLC command"
+                )
+
+            value = self.parse_value(parts[0])
+
+        variables[name] = value
+        return True
 
     def find_script_block(
         self,
@@ -608,24 +663,39 @@ class PLCTerminalApp:
 
         if op_index < 2 or op_index >= len(parts) - 1:
             raise ValueError(
-                "Usage: if <PLC command> <operator> <value>"
+                "Usage: if <value|PLC command> <operator> <value>"
             )
 
-        command = parts[1]
-        command_args = parts[2:op_index]
+        left_parts = parts[1:op_index]
         operator = parts[op_index]
         right_text = " ".join(parts[op_index + 1:])
 
-        if self.plc is None:
-            raise RuntimeError(
-                "Not connected. Run 'config' and then 'connect' first."
-            )
+        command = left_parts[0]
+        is_command = command in PLC_COMMANDS
 
-        left = self.execute_plc_command(
-            command,
-            command_args,
-            echo=False,
-        )
+        if not is_command and self.plc is not None:
+            method = getattr(self.plc, command, None)
+            is_command = callable(method)
+
+        if is_command:
+            if self.plc is None:
+                raise RuntimeError(
+                    "Not connected. Run 'config' and then 'connect' first."
+                )
+
+            left = self.execute_plc_command(
+                command,
+                left_parts[1:],
+                echo=False,
+            )
+        else:
+            if len(left_parts) != 1:
+                raise ValueError(
+                    "Left side must be a value or PLC command"
+                )
+
+            left = self.parse_value(left_parts[0])
+
         right = self.parse_value(right_text)
 
         if operator == "==":
@@ -667,7 +737,17 @@ class PLCTerminalApp:
                 i += 1
                 continue
 
+            if self.assign_script_variable(line, variables):
+                i += 1
+                continue
+
             cmd = parts[0].lower()
+
+            if cmd == "return":
+                if len(parts) != 1:
+                    raise ValueError("Usage: return")
+
+                raise ScriptReturn
 
             if cmd == "for":
                 if len(parts) != 4:
@@ -710,12 +790,12 @@ class PLCTerminalApp:
                 if self.evaluate_script_condition(parts):
                     self.execute_script_lines(
                         body,
-                        variables.copy(),
+                        variables,
                     )
                 elif else_body is not None:
                     self.execute_script_lines(
                         else_body,
-                        variables.copy(),
+                        variables,
                     )
 
                 i = end_index
@@ -740,8 +820,11 @@ Built-in commands:
   disconnect     Close serial connection
   status         Show config and connection status
   methods        List supported MiSmSerial methods
-  check          Run SERIAL/debug.py and return
+  check          Run PLC diagnostics
   set-time       Set the PLC clock from this computer
+  get-time       Read the PLC clock
+  lshw           Show the PLC hardware inventory
+  ls [path]      List files
   run <file>     Run a PLC command script
   sleep <sec>    Pause execution for a number of seconds
   help           Show this help
@@ -766,6 +849,15 @@ Script syntax:
   for <variable> <start> <stop>
       <commands>
   end
+
+  if <value|PLC command> <operator> <value>
+      <commands>
+  else
+      <commands>
+  end
+
+  <variable> = <value|PLC command>
+  return
 
 Variable substitution:
   $variable
@@ -948,12 +1040,12 @@ Features:
             )
 
         return value
-    
+
     def clear(self) -> None:
         if os.name == "nt":
             os.system("cls")
         else:
-            os.system("clear")    
+            os.system("clear")
 
     def connect(self) -> None:
         self.disconnect()
@@ -1152,4 +1244,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
