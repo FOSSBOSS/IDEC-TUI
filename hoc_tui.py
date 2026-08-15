@@ -327,7 +327,7 @@ class PLCTerminalApp:
     def __init__(self) -> None:
         self.config = self._load_config()
         self.plc: MiSmSerial | None = None
-	self.emulator = None
+        self.emulator = None
         self.running = True
         self._setup_readline()
 
