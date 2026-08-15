@@ -1,0 +1,102 @@
+# D5555 bit test
+# Tests bits .01 through .15 individually
+
+write D5555 0
+
+echo "D5555.01 expected bit=1 word=2"
+write_bit D5555.01 1
+read_bit D5555.01
+read D5555
+write D5555 0
+
+echo "D5555.02 expected bit=1 word=4"
+write_bit D5555.02 1
+read_bit D5555.02
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.03 expected bit=1 word=8"
+write_bit D5555.03 1
+read_bit D5555.03
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.04 expected bit=1 word=16"
+write_bit D5555.04 1
+read_bit D5555.04
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.05 expected bit=1 word=32"
+write_bit D5555.05 1
+read_bit D5555.05
+read D5555
+write D5555 0
+sleep 2
+clear
+echo "D5555.06 expected bit=1 word=64"
+write_bit D5555.06 1
+read_bit D5555.06
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.07 expected bit=1 word=128"
+write_bit D5555.07 1
+read_bit D5555.07
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.08 expected bit=1 word=256"
+write_bit D5555.08 1
+read_bit D5555.08
+read D5555
+write D5555 0
+sleep 2
+echo "D5555.09 expected bit=1 word=512"
+write_bit D5555.09 1
+read_bit D5555.09
+read D5555
+write D5555 0
+sleep 2
+clear
+echo "D5555.10 expected bit=1 word=1024"
+write_bit D5555.10 1
+read_bit D5555.10
+read D5555
+write D5555 0
+sleep 2
+sleep 2
+clear
+echo "D5555.11 expected bit=1 word=2048"
+write_bit D5555.11 1
+read_bit D5555.11
+read D5555
+write D5555 0
+sleep 2
+
+echo "D5555.12 expected bit=1 word=4096"
+write_bit D5555.12 1
+read_bit D5555.12
+read D5555
+write D5555 0
+
+echo "D5555.13 expected bit=1 word=8192"
+write_bit D5555.13 1
+read_bit D5555.13
+read D5555
+write D5555 0
+
+echo "D5555.14 expected bit=1 word=16384"
+write_bit D5555.14 1
+read_bit D5555.14
+read D5555
+write D5555 0
+sleep 2
+clear
+echo "D5555.15 expected bit=1 word=32768"
+write_bit D5555.15 1
+read_bit D5555.15
+read D5555
+write D5555 0
+
+echo "D5555 bit test complete"

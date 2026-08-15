@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
-"""IDEC MicroSmart Maintenance Protocol emulator over a Linux PTY."""
+"""IDEC MicroSmart Maintenance Protocol emulator over PTY or TCP."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import pty
 import select
 import signal
+import socket
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+if os.name != "nt":
+    import pty
+else:
+    pty = None
+
+
+DEFAULT_CONFIG = Path(__file__).with_name("plc.json")
 
 ENQ = 0x05
 ACK = 0x06
 NAK = 0x15
-
 
 def xor_bcc(data: bytes) -> int:
     value = 0
@@ -183,28 +190,59 @@ class Emulator:
             start = offset * 4
             self.memory.write_word(dtype, address + offset, int(data[start:start + 4], 16))
 
-
-def load_config(path: str) -> dict:
+def load_config(path: str | Path) -> dict:
     with open(path, "r", encoding="utf-8") as stream:
         return json.load(stream)
 
 
 def install_link(target: str, link_name: str) -> None:
     link = Path(link_name)
+
     if link.is_symlink() or not link.exists():
         link.unlink(missing_ok=True)
         link.symlink_to(target)
         return
+
     raise FileExistsError(f"refusing to replace non-symlink: {link}")
 
 
-def serve(config: dict, link_name: str | None, verbose: bool) -> int:
+def process_chunk(emulator: Emulator, buffer: bytearray,
+                  chunk: bytes, send) -> None:
+    buffer.extend(chunk)
+
+    while b"\r" in buffer:
+        frame, _, remainder = buffer.partition(b"\r")
+        buffer[:] = remainder
+        frame += b"\r"
+
+        if emulator.verbose:
+            print(f"RX {frame.hex()}", file=sys.stderr)
+
+        response = emulator.handle(frame)
+
+        if response is not None:
+            send(response)
+
+            if emulator.verbose:
+                print(f"TX {response.hex()}", file=sys.stderr)
+
+
+def serve(config: dict, link_name: str | None = None,
+          verbose: bool = False) -> int:
+    """Run the emulator using a Linux pseudo-terminal."""
+
+    if pty is None:
+        raise OSError("PTY transport is not available on Windows")
+
     master, slave = pty.openpty()
     port = os.ttyname(slave)
+
     if link_name:
         install_link(port, link_name)
         port = link_name
+
     print(port, flush=True)
+
     emulator = Emulator(config, verbose)
     running = True
 
@@ -214,42 +252,213 @@ def serve(config: dict, link_name: str | None, verbose: bool) -> int:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+
     buffer = bytearray()
+
     try:
         while running:
             readable, _, _ = select.select([master], [], [], 0.25)
+
             if not readable:
                 continue
+
             chunk = os.read(master, 4096)
-            if not chunk:
-                continue
-            buffer.extend(chunk)
-            while b"\r" in buffer:
-                frame, _, remainder = buffer.partition(b"\r")
-                buffer[:] = remainder
-                frame += b"\r"
-                if verbose:
-                    print(f"RX {frame.hex()}", file=sys.stderr)
-                response = emulator.handle(frame)
-                if response is not None:
-                    os.write(master, response)
-                    if verbose:
-                        print(f"TX {response.hex()}", file=sys.stderr)
+
+            if chunk:
+                process_chunk(
+                    emulator,
+                    buffer,
+                    chunk,
+                    lambda data: os.write(master, data),
+                )
+
     finally:
         os.close(master)
         os.close(slave)
+
         if link_name:
             Path(link_name).unlink(missing_ok=True)
+
+    return 0
+
+
+class EmulatorServer:
+    """Background TCP IDEC emulator."""
+
+    def __init__(self, config: dict, host: str = "127.0.0.1",
+                 port: int = 0, verbose: bool = False):
+        self.host = host
+        self.port = port
+        self.emulator = Emulator(config, verbose)
+
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._error: BaseException | None = None
+
+        self._thread = threading.Thread(
+            target=self._run,
+            name="idec-emu",
+            daemon=True,
+        )
+
+        self._thread.start()
+        self._ready.wait()
+
+        if self._error is not None:
+            raise RuntimeError("failed to start IDEC emulator") from self._error
+
+    @property
+    def endpoint(self) -> str:
+        return f"socket://{self.host}:{self.port}"
+
+    def _run(self) -> None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind((self.host, self.port))
+
+                self.port = server.getsockname()[1]
+
+                server.listen(1)
+                server.settimeout(0.25)
+
+                self._ready.set()
+
+                while not self._stop.is_set():
+                    try:
+                        client, _ = server.accept()
+                    except socket.timeout:
+                        continue
+
+                    with client:
+                        client.settimeout(0.25)
+                        buffer = bytearray()
+
+                        while not self._stop.is_set():
+                            try:
+                                chunk = client.recv(4096)
+                            except socket.timeout:
+                                continue
+
+                            if not chunk:
+                                break
+
+                            process_chunk(
+                                self.emulator,
+                                buffer,
+                                chunk,
+                                client.sendall,
+                            )
+
+        except BaseException as error:
+            self._error = error
+            self._ready.set()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+
+def start_emulator(config_path: str | Path | None = None,
+                   verbose: bool = False,
+                   host: str = "127.0.0.1",
+                   port: int = 0) -> EmulatorServer:
+    if config_path is None:
+        config_path = DEFAULT_CONFIG
+
+    config = load_config(config_path)
+
+    return EmulatorServer(
+        config,
+        host=host,
+        port=port,
+        verbose=verbose,
+    )
+
+
+def serve_tcp(config: dict, host: str = "127.0.0.1",
+              port: int = 0, verbose: bool = False) -> int:
+    emulator = EmulatorServer(
+        config,
+        host=host,
+        port=port,
+        verbose=verbose,
+    )
+
+    print(emulator.endpoint, flush=True)
+
+    try:
+        while True:
+            time.sleep(0.25)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        emulator.stop()
+
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="plc.json", help="JSON PLC configuration")
-    parser.add_argument("--link", help="stable symlink to the allocated PTY")
-    parser.add_argument("--verbose", action="store_true", help="print protocol frames")
+
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG),
+        help="JSON PLC configuration",
+    )
+
+    parser.add_argument(
+        "--link",
+        help="stable symlink to the allocated PTY",
+    )
+
+    parser.add_argument(
+        "--tcp",
+        action="store_true",
+        help="use TCP instead of a pseudo-terminal",
+    )
+
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="TCP listen address",
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="TCP port, 0 selects an available port",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print protocol frames",
+    )
+
     args = parser.parse_args()
-    return serve(load_config(args.config), args.link, args.verbose)
+
+    config = load_config(args.config)
+
+    if os.name == "nt" or args.tcp:
+        if args.link:
+            parser.error("--link is only available with PTY transport")
+
+        return serve_tcp(
+            config,
+            host=args.host,
+            port=args.port,
+            verbose=args.verbose,
+        )
+
+    return serve(
+        config,
+        link_name=args.link,
+        verbose=args.verbose,
+    )
 
 
 if __name__ == "__main__":

@@ -30,3 +30,34 @@ plc[connected]> read_bit Q0030 <-- Q should be bound to Y
 Error: bit dtype must be X/Y/M/R (or x/y/m/r)
 Q should be bound to Y, in ouput, it is but in read it is not. 
 ## Check input for the same problem. 
+
+
+##########################
+CHANGE LOG::
+##########################
+MiSmSerial: line 304
+        # IDEC-TUI library mod for simulator
+        self._ser = serial.serial_for_url(
+            port,
+            baudrate=baud,
+            timeout=timeout,
+            bytesize=bytesize,
+            parity=parity,
+            stopbits=stopbits,
+        )
+
+Changed from:
+self._ser = serial.serial_for_url(
+    port=port,
+    baudrate=baud,
+    timeout=timeout,
+    bytesize=bytesize,
+    parity=parity,
+    stopbits=stopbits,
+)
+
+To facilitate IDEC-EMU ( the simulator )
+handling. this will not be pushed upstream,
+and is a specific variant to the library. 
+
+

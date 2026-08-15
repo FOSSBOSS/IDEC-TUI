@@ -59,11 +59,6 @@ try:
 except ImportError:
     readline = None
 
-# OS only really matters for the simluator.
-if os.name == "nt":
-    endpoint = start_tcp_emulator()
-else:
-    endpoint = start_tcp_emulator()
 
 SCRIPT_BUILD = "2026-08-15"
 
@@ -1064,6 +1059,30 @@ Features:
         else:
             os.system("clear")
 
+    def simulate(self) -> None:
+        self.disconnect()
+
+        self.emulator = start_emulator()
+
+        try:
+            self.plc = MiSmSerial(
+                port=self.emulator.endpoint,
+                device=self.config.device,
+                baud=self.config.baud,
+                timeout=self.config.timeout,
+                bytesize=self.config.bytesize,
+                parity=self.config.parity,
+                stopbits=self.config.stopbits,
+                debug=self.config.debug,
+                bcc_mode=self.config.bcc_mode,
+            )
+        except Exception:
+            self.emulator.stop()
+            self.emulator = None
+            raise
+
+        print(f"IDEC-EMU started on {self.emulator.endpoint}")
+
     def connect(self) -> None:
         self.disconnect()
 
@@ -1087,12 +1106,24 @@ Features:
         )
 
     def disconnect(self) -> None:
+        disconnected = False
+
         if self.plc is not None:
             try:
                 self.plc.close()
             finally:
                 self.plc = None
-                print("Disconnected.")
+                disconnected = True
+
+        if self.emulator is not None:
+            try:
+                self.emulator.stop()
+            finally:
+                self.emulator = None
+                disconnected = True
+
+        if disconnected:
+            print("Disconnected.")
 
     def execute_plc_command(
         self,

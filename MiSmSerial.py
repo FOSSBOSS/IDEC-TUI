@@ -303,7 +303,7 @@ class MiSmSerial:
         self.bcc_mode = bcc_mode
         # IDEC-TUI library mod for simulator
         self._ser = serial.serial_for_url(
-            port=port,
+            port,
             baudrate=baud,
             timeout=timeout,
             bytesize=bytesize,

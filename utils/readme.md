@@ -14,3 +14,4 @@ we're writing some utility functions.
 | `get-time` | `get_time.py` | Get the PLC time. |
 | `ls` | `list_path.py` | list files and folders. |
 | `simulate` | `idec_emu.py` | Simulate an IDEC PLC |
+| --- | `plc.json` | Preconfigure the PLC simulator | 
