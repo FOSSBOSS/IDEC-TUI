@@ -301,8 +301,8 @@ class MiSmSerial:
         self.timeout = timeout
         self.debug = debug
         self.bcc_mode = bcc_mode
-
-        self._ser = serial.Serial(
+        # IDEC-TUI library mod for simulator
+        self._ser = serial.serial_for_url(
             port=port,
             baudrate=baud,
             timeout=timeout,

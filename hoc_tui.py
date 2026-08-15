@@ -22,7 +22,8 @@ Notes:
 - Script commands are passed through the same handle_line() command dispatcher
   used by the interactive terminal.
 """
-
+# packaging thing for later
+#serial.urlhandler.protocol_socket
 from __future__ import annotations
 from utils.debug import check
 from utils.lshw import hardware_inventory
@@ -326,6 +327,7 @@ class PLCTerminalApp:
     def __init__(self) -> None:
         self.config = self._load_config()
         self.plc: MiSmSerial | None = None
+	self.emulator = None
         self.running = True
         self._setup_readline()
 
@@ -418,7 +420,11 @@ class PLCTerminalApp:
         return sorted(set(names))
 
     def prompt(self) -> str:
-        state = "connected" if self.plc else "disconnected"
+        if self.emulator is not None:
+            state = "simulated"
+        else:
+            state = "connected" if self.plc else "disconnected"
+
         return f"plc[{state}]> "
 
     def run(self) -> None:
