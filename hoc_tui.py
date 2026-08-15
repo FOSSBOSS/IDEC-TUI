@@ -29,6 +29,7 @@ from utils.lshw import hardware_inventory
 from utils.list_path import list_path
 from utils.setTime import set_time
 from utils.get_time import get_time
+from utils.idec_emu import start_emulator
 import ast
 import atexit
 import json
@@ -57,8 +58,13 @@ try:
 except ImportError:
     readline = None
 
+# OS only really matters for the simluator.
+if os.name == "nt":
+    endpoint = start_tcp_emulator()
+else:
+    endpoint = start_tcp_emulator()
 
-SCRIPT_BUILD = "2026-08-14"
+SCRIPT_BUILD = "2026-08-15"
 
 CONFIG_PATH = Path.home() / ".plc_terminal_config.json"
 HISTORY_PATH = Path.home() / ".plc_terminal_history"
@@ -78,6 +84,7 @@ BUILTIN_COMMANDS = [
     "q",
     "quit",
     "run",
+    "simulate",
     "set-time",
     "sleep",
     "status",
@@ -172,7 +179,7 @@ NO_WORDS = {"n", "no", "0", "false", "off"}
 
 @dataclass
 class AppConfig:
-    port: str = "/dev/ttyUSB0"
+    port: str = "/dev/ttyACM0"
     device: str = "FF"
     baud: int = 19200
     timeout: float = 1.0
@@ -512,6 +519,10 @@ class PLCTerminalApp:
 
         if cmd == "ls":
             list_path(parts[1] if len(parts) > 1 else ".")
+            return
+
+        if cmd == "simulate":
+            self.simulate()
             return
 
         if self.plc is None:

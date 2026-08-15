@@ -13,3 +13,4 @@ we're writing some utility functions.
 | `set-time` | `setTime.py` | Set the PLC time to PC time. |
 | `get-time` | `get_time.py` | Get the PLC time. |
 | `ls` | `list_path.py` | list files and folders. |
+| `simulate` | `idec_emu.py` | Simulate an IDEC PLC |
