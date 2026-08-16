@@ -26,16 +26,16 @@
 | `2E` | FC6A-SIF52                               | **1 RS-232 + 1 RS-485**; both can operate simultaneously                    |
 
 
-IDEC's digital module documentation confirms the point counts and distinguishes the R relay, K sink, and P source versions; \
-for example,\ 
-R081 is 8 relay outputs, T08K1 is 8 sink outputs, and T08P1 is 8 source outputs. \
-The mixed modules are explicitly 4-in/4-out for M08BR1 and 16-in/8-out for M24BR1.\
+IDEC's digital module documentation confirms the point counts and distinguishes the R relay, K sink, and P source versions;  
+for example,  
+R081 is 8 relay outputs, T08K1 is 8 sink outputs, and T08P1 is 8 source outputs.  
+The mixed modules are explicitly 4-in/4-out for M08BR1 and 16-in/8-out for M24BR1.  
 
-The analog cards break down particularly cleanly for your purposes: J = inputs, K = outputs, L = mixed. The L03CN1 is 2 \
-universal analog inputs + 1 analog output, while L06A1 is 4 AI + 2 AO. J4CN1 is four universal analog inputs, \
+The analog cards break down particularly cleanly for your purposes: J = inputs, K = outputs, L = mixed. The L03CN1 is 2  
+universal analog inputs + 1 analog output, while L06A1 is 4 AI + 2 AO. J4CN1 is four universal analog inputs,  
 and J4CH1Y is four isolated thermocouple channels.
 
-For communications, the SIF52 is especially easy to draw because it literally gives you two ports:\
+For communications, the SIF52 is especially easy to draw because it literally gives you two ports:  
 
 # FC6A Hardware References
 
