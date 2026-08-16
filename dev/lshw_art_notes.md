@@ -42,7 +42,7 @@ For communications, the SIF52 is especially easy to draw because it literally gi
 Official IDEC product pages for hardware recognized or relevant to IDEC-TUI `lshw`.
 
 ## CPU 
-(the differecnce between -D16R1CEE, and -D16R4CEE is that r1 is screw terminals, and r5 is push terminals. )  
+(the differecnce between -D16R1CEE, and -D16R4CEE is that r1 is screw terminals, and r4 is push terminals. )  
 
 - [FC6A-D16R1CEE](https://www.idec.com/en-us/automation/programmable-logic-controller/micro-plc/fc6a-microsmart-plc/fc6a-d16r1cee)
 - [FC6A-D16R4CEE](https://www.idec.com/en-us/automation/programmable-logic-controller/micro-plc/fc6a-microsmart-plc/fc6a-d16r4cee)
