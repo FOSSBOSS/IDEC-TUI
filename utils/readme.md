@@ -15,3 +15,5 @@ we're writing some utility functions.
 | `ls` | `list_path.py` | list files and folders. |
 | `simulate` | `idec_emu.py` | Simulate an IDEC PLC |
 | --- | `plc.json` | Preconfigure the PLC simulator | 
+| --- | `scripting.py` | Scripting Engine | 
+| `help` | `help.py` | IDEC-TUI command reference | 
