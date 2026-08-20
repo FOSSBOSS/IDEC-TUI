@@ -18,9 +18,9 @@ Added crude scripting features.
  - for loops and nested for loops
  - call utils & helper functions from scripts
  - integrated PLC Emulator 
- <img src="imgs/script.jpg">
+ <img src="imgs/sim_demo.gif">
  
-An interactive termnial for commanding your IDEC PLC. 
+An interactive terminal for commanding your IDEC PLC. 
 
 Terminal features would be nice right?
 Well it is an interactive shell, and it could be improved.
